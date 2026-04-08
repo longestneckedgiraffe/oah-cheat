@@ -22,4 +22,6 @@ private:
 	void TeleportExploits();
 	void TieUpCivilians();
 	void Invulnerable();
+	void MaxHealth();
+	void MaxArmor();
 };

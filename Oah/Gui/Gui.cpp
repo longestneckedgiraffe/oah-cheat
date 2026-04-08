@@ -5,8 +5,19 @@
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 LRESULT __stdcall WndProc(const HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
-	if (!manager || !manager->pConfig || !manager->pConfig->menu.injected)
-		return CallWindowProc(manager->pGui->oWndProc, hWnd, uMsg, wParam, lParam);
+	if (!manager || !manager->pGui)
+		return DefWindowProc(hWnd, uMsg, wParam, lParam);
+
+	if (!manager->pConfig || !manager->pConfig->menu.injected || manager->pGui->cleanupDone)
+	{
+		if (manager->pGui->oWndProc)
+			return CallWindowProc(manager->pGui->oWndProc, hWnd, uMsg, wParam, lParam);
+
+		return DefWindowProc(hWnd, uMsg, wParam, lParam);
+	}
+
+	if (!manager->pGui->oWndProc)
+		return DefWindowProc(hWnd, uMsg, wParam, lParam);
 
 	static bool hiddenMouse = false;
 	if (manager->pConfig->menu.enabled)
@@ -32,8 +43,14 @@ LRESULT __stdcall WndProc(const HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 
 HRESULT __stdcall Gui::HkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags)
 {
+	InterlockedIncrement(&manager->pGui->activePresentCalls);
+
 	if (manager->pGui->cleanupDone)
-		return manager->pGui->oPresent(pSwapChain, SyncInterval, Flags);
+	{
+		HRESULT result = manager->pGui->oPresent(pSwapChain, SyncInterval, Flags);
+		InterlockedDecrement(&manager->pGui->activePresentCalls);
+		return result;
+	}
 
 	if (!manager->pGui->initDx)
 	{
@@ -58,56 +75,51 @@ HRESULT __stdcall Gui::HkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, 
 			manager->pGui->initDx = true;
 		}
 		else
-			return manager->pGui->oPresent(pSwapChain, SyncInterval, Flags);
+		{
+			HRESULT result = manager->pGui->oPresent(pSwapChain, SyncInterval, Flags);
+			InterlockedDecrement(&manager->pGui->activePresentCalls);
+			return result;
+		}
 	}
 
 	if (!manager->pConfig->menu.injected)
 	{
-		SetWindowLongPtr(manager->pGui->window, GWLP_WNDPROC, (LONG_PTR)(manager->pGui->oWndProc));
-
-		ImGui_ImplDX11_Shutdown();
-		ImGui_ImplWin32_Shutdown();
-		ImGui::DestroyContext();
-
-		if (manager->pGui->mainRenderTargetView)
-		{
-			manager->pGui->mainRenderTargetView->Release();
-			manager->pGui->mainRenderTargetView = nullptr;
-		}
-
-		if (manager->pGui->pContext)
-		{
-			manager->pGui->pContext->Release();
-			manager->pGui->pContext = nullptr;
-		}
-		if (manager->pGui->pDevice)
-		{
-			manager->pGui->pDevice->Release();
-			manager->pGui->pDevice = nullptr;
-		}
-
-		manager->pGui->cleanupDone = true;
-
-		return manager->pGui->oPresent(pSwapChain, SyncInterval, Flags);
+		manager->pGui->Cleanup();
+		HRESULT result = manager->pGui->oPresent(pSwapChain, SyncInterval, Flags);
+		InterlockedDecrement(&manager->pGui->activePresentCalls);
+		return result;
 	}
 
 	manager->pConfig->Hotkeys();
-
-	ImGui_ImplDX11_NewFrame();
-	ImGui_ImplWin32_NewFrame();
-	ImGui::NewFrame();
+	const bool shouldRenderOverlay = manager->pConfig->menu.enabled || manager->pEsp->NeedsOverlayRender();
 
 	__try
 	{
 		manager->UpdateSDK();
-		manager->pGui->RenderImGui();
+		manager->pEsp->Tick();
 	}
 	__except (EXCEPTION_EXECUTE_HANDLER)
 	{
 		manager->ClearSDK();
 	}
 
-	ImGui::Render();
+	if (shouldRenderOverlay)
+	{
+		ImGui_ImplDX11_NewFrame();
+		ImGui_ImplWin32_NewFrame();
+		ImGui::NewFrame();
+
+		__try
+		{
+			manager->pGui->RenderImGui();
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			manager->ClearSDK();
+		}
+
+		ImGui::Render();
+	}
 
 	__try
 	{
@@ -118,16 +130,21 @@ HRESULT __stdcall Gui::HkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, 
 		manager->ClearSDK();
 	}
 
-	__try
+	if (shouldRenderOverlay)
 	{
-		manager->pGui->pContext->OMSetRenderTargets(1, &manager->pGui->mainRenderTargetView, NULL);
-		ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
-	}
-	__except (EXCEPTION_EXECUTE_HANDLER)
-	{
+		__try
+		{
+			manager->pGui->pContext->OMSetRenderTargets(1, &manager->pGui->mainRenderTargetView, NULL);
+			ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+		}
 	}
 
-	return manager->pGui->oPresent(pSwapChain, SyncInterval, Flags);
+	HRESULT result = manager->pGui->oPresent(pSwapChain, SyncInterval, Flags);
+	InterlockedDecrement(&manager->pGui->activePresentCalls);
+	return result;
 }
 
 void Gui::InitImGui()
@@ -147,5 +164,43 @@ void Gui::InitImGui()
 void Gui::RenderImGui()
 {
 	manager->pGui->RenderMainWindow();
-	manager->pEsp->RenderESP();
+	manager->pEsp->RenderOverlay();
+}
+
+void Gui::Cleanup()
+{
+	if (InterlockedCompareExchange(&cleanupStarted, 1, 0) != 0)
+		return;
+
+	if (window && oWndProc)
+	{
+		SetWindowLongPtr(window, GWLP_WNDPROC, (LONG_PTR)(oWndProc));
+		oWndProc = nullptr;
+	}
+
+	if (ImGui::GetCurrentContext())
+	{
+		ImGui_ImplDX11_Shutdown();
+		ImGui_ImplWin32_Shutdown();
+		ImGui::DestroyContext();
+	}
+
+	if (mainRenderTargetView)
+	{
+		mainRenderTargetView->Release();
+		mainRenderTargetView = nullptr;
+	}
+
+	if (pContext)
+	{
+		pContext->Release();
+		pContext = nullptr;
+	}
+	if (pDevice)
+	{
+		pDevice->Release();
+		pDevice = nullptr;
+	}
+
+	cleanupDone = true;
 }

@@ -12,6 +12,7 @@
 #include "../Libs/UEDump/SDK/SpotPlayerComponent_classes.hpp"
 #include "../Libs/UEDump/SDK/CameraBP_classes.hpp"
 #include "../Libs/UEDump/SDK/AlertComponent_classes.hpp"
+#include "../Libs/UEDump/SDK/Armor_Light_classes.hpp"
 #include "../Libs/UEDump/SDK/DoorBP_classes.hpp"
 #include "../Libs/UEDump/SDK/AlarmBP_classes.hpp"
 #include "../Libs/UEDump/SDK/BP_HackingPoint_classes.hpp"
@@ -36,6 +37,17 @@ namespace
 	};
 
 	static std::vector<TrackedWeaponAmmoState> g_trackedAmmoWeapons;
+
+	SDK::AArmor_Light_C* GetEquippedArmorActor()
+	{
+		if (!Vars::CharacterClass || !Vars::CharacterClass->ArmorChildActor)
+			return nullptr;
+		if (!Vars::CharacterClass->ArmorChildActor->ChildActor)
+			return nullptr;
+
+		auto* armor = static_cast<SDK::AArmor_Light_C*>(Vars::CharacterClass->ArmorChildActor->ChildActor);
+		return armor->IsA(SDK::AArmor_Light_C::StaticClass()) ? armor : nullptr;
+	}
 
 	bool TryReadWeaponAmmoState(SDK::AGunBase_C* weapon, WeaponAmmoState& state)
 	{
@@ -135,6 +147,8 @@ void Hacks::RunHacks()
 	TeleportExploits();
 	TieUpCivilians();
 	Invulnerable();
+	MaxHealth();
+	MaxArmor();
 }
 
 void Hacks::Aimbot()
@@ -743,4 +757,54 @@ void Hacks::Invulnerable()
 	invulnerableState = true;
 
 	Vars::CharacterClass->GiveImmunityLevel(99999.f);
+}
+
+void Hacks::MaxHealth()
+{
+	static int maxHealthFrameCounter = 0;
+
+	if (!manager->pConfig->maxHealth.enabled)
+	{
+		maxHealthFrameCounter = 0;
+		return;
+	}
+
+	maxHealthFrameCounter++;
+	if (maxHealthFrameCounter < 30)
+		return;
+	maxHealthFrameCounter = 0;
+
+	const int maxHealth = Vars::CharacterClass->MaxHealth;
+	if (maxHealth <= 0)
+		return;
+
+	if (Vars::CharacterClass->Health < maxHealth)
+		Vars::CharacterClass->Health = maxHealth;
+}
+
+void Hacks::MaxArmor()
+{
+	static int maxArmorFrameCounter = 0;
+
+	if (!manager->pConfig->maxArmor.enabled)
+	{
+		maxArmorFrameCounter = 0;
+		return;
+	}
+
+	maxArmorFrameCounter++;
+	if (maxArmorFrameCounter < 30)
+		return;
+	maxArmorFrameCounter = 0;
+
+	SDK::AArmor_Light_C* armor = GetEquippedArmorActor();
+	if (!armor)
+		return;
+	if (armor->Destroyed_)
+		return;
+	if (armor->ArmorMaxHealth <= 0)
+		return;
+
+	if (armor->ArmorHealth < armor->ArmorMaxHealth)
+		armor->ArmorHealth = armor->ArmorMaxHealth;
 }

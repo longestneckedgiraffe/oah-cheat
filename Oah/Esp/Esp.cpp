@@ -8,8 +8,37 @@
 #include "../Libs/UEDump/SDK/PlayerCharacter_classes.hpp"
 #include "../Libs/UEDump/SDK/RatCharacter_classes.hpp"
 
-void Esp::RefreshEspActorCache(bool forceRefresh)
+namespace
 {
+	bool HasAnyBoxOverlayEnabled(const Config& config)
+	{
+		return
+			(config.esp.policeEspEnabled && (config.esp.policeBox2DEnabled || config.esp.policeBox3DEnabled)) ||
+			(config.esp.playerEspEnabled && (config.esp.playerBox2DEnabled || config.esp.playerBox3DEnabled)) ||
+			(config.esp.cameraEspEnabled && (config.esp.cameraBox2DEnabled || config.esp.cameraBox3DEnabled)) ||
+			(config.esp.ratEspEnabled && (config.esp.ratBox2DEnabled || config.esp.ratBox3DEnabled));
+	}
+
+	bool HasAnyGlowEnabled(const Config& config)
+	{
+		return
+			(config.esp.policeEspEnabled && config.esp.policeGlowEnabled) ||
+			(config.esp.playerEspEnabled && config.esp.playerGlowEnabled) ||
+			(config.esp.cameraEspEnabled && config.esp.cameraGlowEnabled) ||
+			(config.esp.ratEspEnabled && config.esp.ratGlowEnabled);
+	}
+}
+
+void Esp::RefreshEspActorCache(bool forceRefresh, bool trackPolice, bool trackPlayers, bool trackCameras, bool trackRats)
+{
+	if (!trackPolice && !trackPlayers && !trackCameras && !trackRats)
+	{
+		cachedEspActors.clear();
+		cachedEspLevel = nullptr;
+		actorCacheFrameCounter = 0;
+		return;
+	}
+
 	if (!Vars::World || Vars::World->Levels.Num() == 0)
 	{
 		cachedEspActors.clear();
@@ -30,7 +59,7 @@ void Esp::RefreshEspActorCache(bool forceRefresh)
 	actorCacheFrameCounter++;
 	const bool refreshNow = forceRefresh ||
 		cachedEspLevel != currLevel ||
-		actorCacheFrameCounter >= 30 ||
+		actorCacheFrameCounter >= 120 ||
 		cachedEspActors.empty();
 
 	if (!refreshNow)
@@ -49,27 +78,48 @@ void Esp::RefreshEspActorCache(bool forceRefresh)
 		if (Fns::IsBadPoint(currActor))
 			continue;
 
-		if (currActor->IsA(SDK::ANPC_Guard_C::StaticClass()) || currActor->IsA(SDK::ANPC_Police_base_C::StaticClass()))
+		if (trackPolice && currActor->IsA(SDK::ANPC_Guard_C::StaticClass()))
+		{
+			cachedEspActors.push_back({ currActor, TrackedActorType::Guard });
+		}
+		else if (trackPolice && currActor->IsA(SDK::ANPC_Police_base_C::StaticClass()))
 		{
 			cachedEspActors.push_back({ currActor, TrackedActorType::Police });
 		}
-		else if (currActor->IsA(SDK::APlayerCharacter_C::StaticClass()))
+		else if (trackPlayers && currActor->IsA(SDK::APlayerCharacter_C::StaticClass()))
 		{
 			cachedEspActors.push_back({ currActor, TrackedActorType::Player });
 		}
-		else if (currActor->IsA(SDK::ACameraBP_C::StaticClass()))
+		else if (trackCameras && currActor->IsA(SDK::ACameraBP_C::StaticClass()))
 		{
 			cachedEspActors.push_back({ currActor, TrackedActorType::Camera });
 		}
-		else if (currActor->IsA(SDK::ARatCharacter_C::StaticClass()))
+		else if (trackRats && currActor->IsA(SDK::ARatCharacter_C::StaticClass()))
 		{
 			cachedEspActors.push_back({ currActor, TrackedActorType::Rat });
 		}
 	}
 }
 
-void Esp::RenderESP()
+bool Esp::NeedsOverlayRender() const
 {
+	if (!manager || !manager->pConfig)
+		return false;
+
+	const Config& config = *manager->pConfig;
+	return
+		(config.aimbot.enabled && config.aimbot.showFov) ||
+		config.esp.bulletTracersEnabled ||
+		HasAnyBoxOverlayEnabled(config);
+}
+
+void Esp::Tick()
+{
+	if (!manager || !manager->pConfig)
+		return;
+
+	const Config& config = *manager->pConfig;
+
 	bool policeNow = manager->pConfig->esp.policeEspEnabled;
 	bool policeGlowNow = manager->pConfig->esp.policeGlowEnabled;
 	bool policeBox2DNow = manager->pConfig->esp.policeBox2DEnabled;
@@ -87,18 +137,8 @@ void Esp::RenderESP()
 	bool ratBox2DNow = manager->pConfig->esp.ratBox2DEnabled;
 	bool ratBox3DNow = manager->pConfig->esp.ratBox3DEnabled;
 
-	bool anyGlowEnabled =
-		(policeNow && policeGlowNow) ||
-		(playerNow && playerGlowNow) ||
-		(cameraNow && cameraGlowNow) ||
-		(ratNow && ratGlowNow);
-
-	bool anyBoxEnabled =
-		(policeNow && (policeBox2DNow || policeBox3DNow)) ||
-		(playerNow && (playerBox2DNow || playerBox3DNow)) ||
-		(cameraNow && (cameraBox2DNow || cameraBox3DNow)) ||
-		(ratNow && (ratBox2DNow || ratBox3DNow));
-
+	bool anyGlowEnabled = HasAnyGlowEnabled(config);
+	bool anyBoxEnabled = HasAnyBoxOverlayEnabled(config);
 	bool prevAnyGlowEnabled =
 		(prevPoliceEsp && prevPoliceGlow) ||
 		(prevPlayerEsp && prevPlayerGlow) ||
@@ -107,6 +147,10 @@ void Esp::RenderESP()
 
 	bool anyTrackedVisuals = anyGlowEnabled || anyBoxEnabled || prevAnyGlowEnabled;
 	const bool filterDormantNow = manager->pConfig->settings.filterDormant;
+	const bool trackPolice = policeNow || prevPoliceEsp;
+	const bool trackPlayers = playerNow || prevPlayerEsp;
+	const bool trackCameras = cameraNow || prevCameraEsp;
+	const bool trackRats = ratNow || prevRatEsp;
 
 	bool stateChanged =
 		policeNow != prevPoliceEsp ||
@@ -119,15 +163,12 @@ void Esp::RenderESP()
 		ratGlowNow != prevRatGlow ||
 		filterDormantNow != prevFilterDormant;
 
-	RenderFovCircle();
 	UpdateBulletTracers();
-	RenderBulletTracers();
 
 	if (anyTrackedVisuals)
-		RefreshEspActorCache(stateChanged);
-
-	RenderEntityBoxes();
-	RenderDebugESP();
+		RefreshEspActorCache(stateChanged, trackPolice, trackPlayers, trackCameras, trackRats);
+	else
+		RefreshEspActorCache(false, false, false, false, false);
 
 	bool shouldRun = false;
 	if (stateChanged)
@@ -138,7 +179,7 @@ void Esp::RenderESP()
 	else if (anyGlowEnabled || prevAnyGlowEnabled)
 	{
 		espFrameCounter++;
-		if (espFrameCounter >= 30)
+		if (espFrameCounter >= 120)
 		{
 			shouldRun = true;
 			espFrameCounter = 0;
@@ -162,6 +203,20 @@ void Esp::RenderESP()
 	prevFilterDormant = filterDormantNow;
 }
 
+void Esp::RenderOverlay()
+{
+	RenderFovCircle();
+	RenderBulletTracers();
+	RenderEntityBoxes();
+}
+
+void Esp::RenderESP()
+{
+	Tick();
+	if (NeedsOverlayRender())
+		RenderOverlay();
+}
+
 void Esp::ApplyGlow()
 {
 	if (!Vars::MyController)
@@ -179,7 +234,7 @@ void Esp::ApplyGlow()
 		if (Fns::IsBadPoint(currActor))
 			continue;
 
-		if (cachedActor.type == TrackedActorType::Police && currActor->IsA(SDK::ANPC_Guard_C::StaticClass()))
+		if (cachedActor.type == TrackedActorType::Guard)
 		{
 			auto* guard = static_cast<SDK::ANPC_Guard_C*>(currActor);
 			bool enabling = manager->pConfig->esp.policeEspEnabled &&
@@ -194,7 +249,7 @@ void Esp::ApplyGlow()
 					guard->Hat->SetCustomDepthStencilValue(0);
 			}
 		}
-		else if (cachedActor.type == TrackedActorType::Police && currActor->IsA(SDK::ANPC_Police_base_C::StaticClass()))
+		else if (cachedActor.type == TrackedActorType::Police)
 		{
 			auto* police = static_cast<SDK::ANPC_Police_base_C*>(currActor);
 			bool enabling = manager->pConfig->esp.policeEspEnabled &&

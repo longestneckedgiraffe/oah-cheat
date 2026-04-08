@@ -153,7 +153,8 @@ static bool GetVisualBounds(const Esp::CachedEspActor& cachedActor, SDK::FVector
 	if (!actor)
 		return false;
 
-	if (cachedActor.type == Esp::TrackedActorType::Police ||
+	if (cachedActor.type == Esp::TrackedActorType::Guard ||
+		cachedActor.type == Esp::TrackedActorType::Police ||
 		cachedActor.type == Esp::TrackedActorType::Player ||
 		cachedActor.type == Esp::TrackedActorType::Rat)
 	{
@@ -341,12 +342,12 @@ void Esp::RenderEntityBoxes()
 			continue;
 
 		bool shouldRender = false;
-		if (cachedActor.type == TrackedActorType::Police && currActor->IsA(SDK::ANPC_Guard_C::StaticClass()))
+		if (cachedActor.type == TrackedActorType::Guard)
 		{
 			auto* guard = static_cast<SDK::ANPC_Guard_C*>(currActor);
 			shouldRender = manager->pConfig->esp.policeEspEnabled && !(filterDormant && guard->Dead_);
 		}
-		else if (cachedActor.type == TrackedActorType::Police && currActor->IsA(SDK::ANPC_Police_base_C::StaticClass()))
+		else if (cachedActor.type == TrackedActorType::Police)
 		{
 			auto* police = static_cast<SDK::ANPC_Police_base_C*>(currActor);
 			shouldRender = manager->pConfig->esp.policeEspEnabled && !(filterDormant && police->Dead_);
@@ -374,6 +375,7 @@ void Esp::RenderEntityBoxes()
 		bool draw3D = false;
 		switch (cachedActor.type)
 		{
+		case TrackedActorType::Guard:
 		case TrackedActorType::Police:
 			draw2D = manager->pConfig->esp.policeBox2DEnabled;
 			draw3D = manager->pConfig->esp.policeBox3DEnabled;
@@ -403,6 +405,7 @@ void Esp::RenderEntityBoxes()
 			continue;
 
 		const bool isCharacterActor =
+			cachedActor.type == TrackedActorType::Guard ||
 			cachedActor.type == TrackedActorType::Police ||
 			cachedActor.type == TrackedActorType::Player ||
 			cachedActor.type == TrackedActorType::Rat;
@@ -434,100 +437,7 @@ void Esp::RenderEntityBoxes()
 
 void Esp::RenderDebugESP()
 {
-	if (!manager->pConfig->debugEsp.enabled)
-		return;
-	if (!Vars::MyController || !Vars::World || Vars::World->Levels.Num() == 0)
-		return;
-
-	SDK::ULevel* currLevel = Vars::World->Levels[0];
-	if (!currLevel)
-		return;
-
-	ImFont* font = manager->pGui->tahomaFont;
-	if (!font)
-		return;
-
-	SDK::FVector cameraLocation = Vars::MyController->PlayerCameraManager->GetCameraLocation();
-	float maxDist = manager->pConfig->debugEsp.maxDistance;
-	float maxDistSq = maxDist * maxDist;
-
-	auto* drawList = ImGui::GetBackgroundDrawList();
-	ImU32 boxColor = IM_COL32(0, 255, 0, 120);
-	ImU32 textColor = IM_COL32(255, 255, 255, 200);
-	ImU32 textBg = IM_COL32(0, 0, 0, 150);
-
-	for (int j = 0; j < currLevel->Actors.Num(); j++)
-	{
-		SDK::AActor* currActor = currLevel->Actors[j];
-		if (!currActor || !currActor->RootComponent)
-			continue;
-		if (Fns::IsBadPoint(currActor))
-			continue;
-
-		SDK::FVector origin{};
-		SDK::FVector extent{};
-		currActor->GetActorBounds(true, &origin, &extent, false);
-
-		if (origin.X == 0.f && origin.Y == 0.f && origin.Z == 0.f)
-			continue;
-		if (extent.X == 0.f && extent.Y == 0.f && extent.Z == 0.f)
-			continue;
-
-		float dx = origin.X - cameraLocation.X;
-		float dy = origin.Y - cameraLocation.Y;
-		float dz = origin.Z - cameraLocation.Z;
-		if (dx * dx + dy * dy + dz * dz > maxDistSq)
-			continue;
-
-		ImVec2 screenCenter;
-		if (!WorldToScreen(origin, screenCenter))
-			continue;
-
-		SDK::FVector corners[8] = {
-			{ origin.X - extent.X, origin.Y - extent.Y, origin.Z - extent.Z },
-			{ origin.X + extent.X, origin.Y - extent.Y, origin.Z - extent.Z },
-			{ origin.X + extent.X, origin.Y + extent.Y, origin.Z - extent.Z },
-			{ origin.X - extent.X, origin.Y + extent.Y, origin.Z - extent.Z },
-			{ origin.X - extent.X, origin.Y - extent.Y, origin.Z + extent.Z },
-			{ origin.X + extent.X, origin.Y - extent.Y, origin.Z + extent.Z },
-			{ origin.X + extent.X, origin.Y + extent.Y, origin.Z + extent.Z },
-			{ origin.X - extent.X, origin.Y + extent.Y, origin.Z + extent.Z },
-		};
-
-		ImVec2 screenCorners[8];
-		bool allVisible = true;
-		for (int k = 0; k < 8; k++)
-		{
-			if (!WorldToScreen(corners[k], screenCorners[k]))
-			{
-				allVisible = false;
-				break;
-			}
-		}
-
-		if (!allVisible)
-			continue;
-
-		int edges[12][2] = {
-			{0,1},{1,2},{2,3},{3,0},
-			{4,5},{5,6},{6,7},{7,4},
-			{0,4},{1,5},{2,6},{3,7},
-		};
-		for (int k = 0; k < 12; k++)
-			drawList->AddLine(screenCorners[edges[k][0]], screenCorners[edges[k][1]], boxColor, 1.0f);
-
-		std::string name = currActor->GetName();
-		float fontSize = font->LegacySize;
-		ImVec2 textSize = font->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, name.c_str());
-		ImVec2 textPos = { screenCenter.x - textSize.x * 0.5f, screenCenter.y - textSize.y - 2.f };
-
-		drawList->AddRectFilled(
-			{ textPos.x - 2, textPos.y - 1 },
-			{ textPos.x + textSize.x + 2, textPos.y + textSize.y + 1 },
-			textBg
-		);
-		drawList->AddText(font, fontSize, textPos, textColor, name.c_str());
-	}
+	return;
 }
 
 void Esp::RenderFovCircle()

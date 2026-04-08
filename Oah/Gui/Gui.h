@@ -14,10 +14,13 @@ public:
 
 	bool initDx = false;
 	bool cleanupDone = false;
+	volatile LONG cleanupStarted = 0;
+	volatile LONG activePresentCalls = 0;
 
 	static HRESULT __stdcall HkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags);
 
 	void InitImGui();
+	void Cleanup();
 	void RenderImGui();
 
 	void RenderMainWindow();

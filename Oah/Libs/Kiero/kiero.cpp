@@ -667,6 +667,7 @@ void kiero::shutdown()
 	{
 #if KIERO_USE_MINHOOK
 		MH_DisableHook(MH_ALL_HOOKS);
+		MH_Uninitialize();
 #endif
 
 		::free(g_methodsTable);

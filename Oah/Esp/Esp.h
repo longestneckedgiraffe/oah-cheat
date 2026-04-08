@@ -8,11 +8,15 @@
 class Esp
 {
 public:
+	void Tick();
+	void RenderOverlay();
+	bool NeedsOverlayRender() const;
 	void RenderESP();
 	void DisableAll();
 
 	enum class TrackedActorType
 	{
+		Guard,
 		Police,
 		Player,
 		Camera,
@@ -33,7 +37,7 @@ public:
 	};
 
 private:
-	void RefreshEspActorCache(bool forceRefresh = false);
+	void RefreshEspActorCache(bool forceRefresh, bool trackPolice, bool trackPlayers, bool trackCameras, bool trackRats);
 	void ApplyGlow();
 	void UpdateBulletTracers();
 	void RenderBulletTracers();

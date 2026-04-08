@@ -76,6 +76,8 @@ void Gui::RenderMainWindow()
 
 					ImGui::Separator();
 					ImGui::Checkbox("Invulnerable", &manager->pConfig->invulnerable.enabled);
+					ImGui::Checkbox("Max Health", &manager->pConfig->maxHealth.enabled);
+					ImGui::Checkbox("Max Armor", &manager->pConfig->maxArmor.enabled);
 					ImGui::EndChild();
 
 					ImGui::TableNextColumn();
@@ -144,16 +146,6 @@ void Gui::RenderMainWindow()
 					ImGui::Checkbox("Bullet Tracers", &manager->pConfig->esp.bulletTracersEnabled);
 					ImGui::Separator();
 					ImGui::Checkbox("Dormant", &manager->pConfig->settings.filterDormant);
-
-#ifdef _DEBUG
-					ImGui::Separator();
-					ImGui::Checkbox("Object Viewer", &manager->pConfig->debugEsp.enabled);
-					if (manager->pConfig->debugEsp.enabled)
-					{
-						ImGui::SetNextItemWidth(-FLT_MIN);
-						ImGui::SliderFloat("Render Distance", &manager->pConfig->debugEsp.maxDistance, 500.0f, 10000.0f, "%.0f");
-					}
-#endif
 					ImGui::EndChild();
 
 					ImGui::EndTable();

@@ -142,6 +142,8 @@ DWORD WINAPI MainThread(HMODULE hmodule)
 			manager->pConfig->disableCameras.enabled = false;
 			manager->pConfig->guardPhoneDelay.enabled = false;
 			manager->pConfig->invulnerable.enabled = false;
+			manager->pConfig->maxHealth.enabled = false;
+			manager->pConfig->maxArmor.enabled = false;
 			manager->pConfig->unlimitedAmmo.enabled = false;
 			manager->pConfig->rapidFire.enabled = false;
 			manager->pConfig->instantReload.enabled = false;
@@ -152,6 +154,7 @@ DWORD WINAPI MainThread(HMODULE hmodule)
 			manager->pConfig->esp.playerEspEnabled = false;
 			manager->pConfig->esp.cameraEspEnabled = false;
 			manager->pConfig->esp.ratEspEnabled = false;
+			manager->pConfig->menu.enabled = false;
 
 			Sleep(200);
 
@@ -159,10 +162,20 @@ DWORD WINAPI MainThread(HMODULE hmodule)
 
 			manager->pConfig->menu.injected = false;
 
-			for (int i = 0; i < 200 && !manager->pGui->cleanupDone; i++)
+			for (int i = 0; i < 500 && !manager->pGui->cleanupDone; i++)
 				Sleep(10);
 
+			if (!manager->pGui->cleanupDone && manager->pGui->activePresentCalls == 0)
+				manager->pGui->Cleanup();
+
+			kiero::unbind(8);
 			kiero::shutdown();
+
+			for (int i = 0; i < 500 && manager->pGui->activePresentCalls > 0; i++)
+				Sleep(10);
+
+			manager->ClearSDK();
+			manager.reset();
 			Sleep(100);
 
 			if (consoleFile)

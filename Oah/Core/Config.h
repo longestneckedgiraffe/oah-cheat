@@ -116,6 +116,16 @@ public:
 		bool enabled{ false };
 	} invulnerable;
 
+	struct MaxHealth
+	{
+		bool enabled{ false };
+	} maxHealth;
+
+	struct MaxArmor
+	{
+		bool enabled{ false };
+	} maxArmor;
+
 	struct Settings
 	{
 		bool filterDormant{ true };
