@@ -17,6 +17,8 @@
 #include "../Libs/UEDump/SDK/AlarmBP_classes.hpp"
 #include "../Libs/UEDump/SDK/BP_HackingPoint_classes.hpp"
 #include "../Libs/UEDump/SDK/BP_Powerbox_classes.hpp"
+#include "../Libs/UEDump/SDK/Lock_classes.hpp"
+#include "../Libs/UEDump/SDK/Lock_pick_classes.hpp"
 
 SDK::FVector GetVectorForward(const SDK::FVector& angles);
 SDK::FVector GetVectorForward(const SDK::FRotator& angles);
@@ -124,6 +126,32 @@ namespace
 
 		g_trackedAmmoWeapons.push_back({ weapon, state });
 	}
+
+	bool TryCompleteActiveLockpick(SDK::ALock_C* lock)
+	{
+		__try
+		{
+			if (!lock || lock->Unlocked_)
+				return false;
+			if (!lock->Tool || !lock->Tool->Picking_)
+				return false;
+
+			SDK::ALock_pick_C* tool = lock->Tool;
+			tool->PickProgress = tool->PickMaxChange > 0.0f ? tool->PickMaxChange : 100.0f;
+			tool->JiggleChange = 0.0f;
+			tool->Picking_ = false;
+
+			lock->Unlocked_ = true;
+			lock->Unlock();
+			lock->UnlockMulti();
+			tool->StopPickLock();
+			return true;
+		}
+		__except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION)
+		{
+			return false;
+		}
+	}
 }
 
 void Hacks::RunHacks()
@@ -142,6 +170,7 @@ void Hacks::RunHacks()
 	UnlimitedAmmo();
 	GunMods();
 	JumpHack();
+	InstantLockpick();
 	UnlockDoors();
 	DisableAlarms();
 	TeleportExploits();
@@ -588,6 +617,46 @@ void Hacks::JumpHack()
 	{
 		Vars::CharacterClass->CharacterMovement->JumpZVelocity = 300.f;
 		jumpHackState = false;
+	}
+}
+
+void Hacks::InstantLockpick()
+{
+	if (!manager->pConfig->instantLockpick.enabled)
+		return;
+	if (!Vars::World || Vars::World->Levels.Num() == 0)
+		return;
+
+	__try
+	{
+		if (Vars::CharacterClass->HoldingActor &&
+			Vars::CharacterClass->HoldingActor->IsA(SDK::ALock_pick_C::StaticClass()))
+		{
+			auto* heldLockpick = static_cast<SDK::ALock_pick_C*>(Vars::CharacterClass->HoldingActor);
+			if (heldLockpick->Lock && TryCompleteActiveLockpick(heldLockpick->Lock))
+				return;
+		}
+	}
+	__except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION)
+	{
+	}
+
+	SDK::ULevel* currLevel = Vars::World->Levels[0];
+	if (!currLevel)
+		return;
+
+	for (int j = 0; j < currLevel->Actors.Num(); j++)
+	{
+		SDK::AActor* currActor = currLevel->Actors[j];
+		if (!currActor || !currActor->RootComponent)
+			continue;
+		if (Fns::IsBadPoint(currActor))
+			continue;
+		if (!currActor->IsA(SDK::ALock_C::StaticClass()))
+			continue;
+
+		if (TryCompleteActiveLockpick(static_cast<SDK::ALock_C*>(currActor)))
+			return;
 	}
 }
 

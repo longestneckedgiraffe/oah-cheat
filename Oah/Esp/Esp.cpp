@@ -10,22 +10,42 @@
 
 namespace
 {
+	bool IsPoliceEspActive(const Config& config)
+	{
+		return config.esp.policeGlowEnabled || config.esp.policeBox2DEnabled || config.esp.policeBox3DEnabled;
+	}
+
+	bool IsPlayerEspActive(const Config& config)
+	{
+		return config.esp.playerGlowEnabled || config.esp.playerBox2DEnabled || config.esp.playerBox3DEnabled;
+	}
+
+	bool IsCameraEspActive(const Config& config)
+	{
+		return config.esp.cameraGlowEnabled || config.esp.cameraBox2DEnabled || config.esp.cameraBox3DEnabled;
+	}
+
+	bool IsRatEspActive(const Config& config)
+	{
+		return config.esp.ratGlowEnabled || config.esp.ratBox2DEnabled || config.esp.ratBox3DEnabled;
+	}
+
 	bool HasAnyBoxOverlayEnabled(const Config& config)
 	{
 		return
-			(config.esp.policeEspEnabled && (config.esp.policeBox2DEnabled || config.esp.policeBox3DEnabled)) ||
-			(config.esp.playerEspEnabled && (config.esp.playerBox2DEnabled || config.esp.playerBox3DEnabled)) ||
-			(config.esp.cameraEspEnabled && (config.esp.cameraBox2DEnabled || config.esp.cameraBox3DEnabled)) ||
-			(config.esp.ratEspEnabled && (config.esp.ratBox2DEnabled || config.esp.ratBox3DEnabled));
+			(IsPoliceEspActive(config) && (config.esp.policeBox2DEnabled || config.esp.policeBox3DEnabled)) ||
+			(IsPlayerEspActive(config) && (config.esp.playerBox2DEnabled || config.esp.playerBox3DEnabled)) ||
+			(IsCameraEspActive(config) && (config.esp.cameraBox2DEnabled || config.esp.cameraBox3DEnabled)) ||
+			(IsRatEspActive(config) && (config.esp.ratBox2DEnabled || config.esp.ratBox3DEnabled));
 	}
 
 	bool HasAnyGlowEnabled(const Config& config)
 	{
 		return
-			(config.esp.policeEspEnabled && config.esp.policeGlowEnabled) ||
-			(config.esp.playerEspEnabled && config.esp.playerGlowEnabled) ||
-			(config.esp.cameraEspEnabled && config.esp.cameraGlowEnabled) ||
-			(config.esp.ratEspEnabled && config.esp.ratGlowEnabled);
+			(IsPoliceEspActive(config) && config.esp.policeGlowEnabled) ||
+			(IsPlayerEspActive(config) && config.esp.playerGlowEnabled) ||
+			(IsCameraEspActive(config) && config.esp.cameraGlowEnabled) ||
+			(IsRatEspActive(config) && config.esp.ratGlowEnabled);
 	}
 }
 
@@ -59,8 +79,7 @@ void Esp::RefreshEspActorCache(bool forceRefresh, bool trackPolice, bool trackPl
 	actorCacheFrameCounter++;
 	const bool refreshNow = forceRefresh ||
 		cachedEspLevel != currLevel ||
-		actorCacheFrameCounter >= 120 ||
-		cachedEspActors.empty();
+		actorCacheFrameCounter >= 120;
 
 	if (!refreshNow)
 		return;
@@ -120,19 +139,19 @@ void Esp::Tick()
 
 	const Config& config = *manager->pConfig;
 
-	bool policeNow = manager->pConfig->esp.policeEspEnabled;
+	bool policeNow = IsPoliceEspActive(config);
 	bool policeGlowNow = manager->pConfig->esp.policeGlowEnabled;
 	bool policeBox2DNow = manager->pConfig->esp.policeBox2DEnabled;
 	bool policeBox3DNow = manager->pConfig->esp.policeBox3DEnabled;
-	bool playerNow = manager->pConfig->esp.playerEspEnabled;
+	bool playerNow = IsPlayerEspActive(config);
 	bool playerGlowNow = manager->pConfig->esp.playerGlowEnabled;
 	bool playerBox2DNow = manager->pConfig->esp.playerBox2DEnabled;
 	bool playerBox3DNow = manager->pConfig->esp.playerBox3DEnabled;
-	bool cameraNow = manager->pConfig->esp.cameraEspEnabled;
+	bool cameraNow = IsCameraEspActive(config);
 	bool cameraGlowNow = manager->pConfig->esp.cameraGlowEnabled;
 	bool cameraBox2DNow = manager->pConfig->esp.cameraBox2DEnabled;
 	bool cameraBox3DNow = manager->pConfig->esp.cameraBox3DEnabled;
-	bool ratNow = manager->pConfig->esp.ratEspEnabled;
+	bool ratNow = IsRatEspActive(config);
 	bool ratGlowNow = manager->pConfig->esp.ratGlowEnabled;
 	bool ratBox2DNow = manager->pConfig->esp.ratBox2DEnabled;
 	bool ratBox3DNow = manager->pConfig->esp.ratBox3DEnabled;
@@ -237,7 +256,7 @@ void Esp::ApplyGlow()
 		if (cachedActor.type == TrackedActorType::Guard)
 		{
 			auto* guard = static_cast<SDK::ANPC_Guard_C*>(currActor);
-			bool enabling = manager->pConfig->esp.policeEspEnabled &&
+			bool enabling = IsPoliceEspActive(*manager->pConfig) &&
 				manager->pConfig->esp.policeGlowEnabled &&
 				!(filterDormant && guard->Dead_);
 			if (guard->Mesh)
@@ -252,7 +271,7 @@ void Esp::ApplyGlow()
 		else if (cachedActor.type == TrackedActorType::Police)
 		{
 			auto* police = static_cast<SDK::ANPC_Police_base_C*>(currActor);
-			bool enabling = manager->pConfig->esp.policeEspEnabled &&
+			bool enabling = IsPoliceEspActive(*manager->pConfig) &&
 				manager->pConfig->esp.policeGlowEnabled &&
 				!(filterDormant && police->Dead_);
 			auto* character = static_cast<SDK::ACharacter*>(currActor);
@@ -262,7 +281,7 @@ void Esp::ApplyGlow()
 		else if (cachedActor.type == TrackedActorType::Camera)
 		{
 			auto* camera = static_cast<SDK::ACameraBP_C*>(currActor);
-			bool enabling = manager->pConfig->esp.cameraEspEnabled &&
+			bool enabling = IsCameraEspActive(*manager->pConfig) &&
 				manager->pConfig->esp.cameraGlowEnabled &&
 				!(filterDormant && camera->Destroyed_);
 			if (camera->CameraHead)
@@ -274,7 +293,7 @@ void Esp::ApplyGlow()
 		{
 			auto* character = static_cast<SDK::ACharacter*>(currActor);
 			bool isLocalPlayer = currActor == Vars::CharacterClass || currActor->GetOwner() == Vars::MyController;
-			bool enabling = manager->pConfig->esp.playerEspEnabled &&
+			bool enabling = IsPlayerEspActive(*manager->pConfig) &&
 				manager->pConfig->esp.playerGlowEnabled &&
 				!isLocalPlayer;
 			if (character->Mesh)
@@ -287,7 +306,7 @@ void Esp::ApplyGlow()
 		else if (cachedActor.type == TrackedActorType::Rat)
 		{
 			auto* rat = static_cast<SDK::ARatCharacter_C*>(currActor);
-			bool enabling = manager->pConfig->esp.ratEspEnabled &&
+			bool enabling = IsRatEspActive(*manager->pConfig) &&
 				manager->pConfig->esp.ratGlowEnabled &&
 				!(filterDormant && rat->Dead_);
 			if (rat->Mesh)

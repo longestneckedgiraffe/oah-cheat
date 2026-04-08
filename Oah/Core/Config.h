@@ -101,6 +101,11 @@ public:
 		bool enabled{ false };
 	} disableAlarms;
 
+	struct InstantLockpick
+	{
+		bool enabled{ false };
+	} instantLockpick;
+
 	struct TeleportExploits
 	{
 		bool killRats{ false };

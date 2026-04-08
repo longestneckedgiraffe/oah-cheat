@@ -13,6 +13,29 @@
 #include "../Libs/UEDump/SDK/PlayerCharacter_classes.hpp"
 #include "../Libs/UEDump/SDK/RatCharacter_classes.hpp"
 
+namespace
+{
+	bool IsPoliceEspActive(const Config& config)
+	{
+		return config.esp.policeGlowEnabled || config.esp.policeBox2DEnabled || config.esp.policeBox3DEnabled;
+	}
+
+	bool IsPlayerEspActive(const Config& config)
+	{
+		return config.esp.playerGlowEnabled || config.esp.playerBox2DEnabled || config.esp.playerBox3DEnabled;
+	}
+
+	bool IsCameraEspActive(const Config& config)
+	{
+		return config.esp.cameraGlowEnabled || config.esp.cameraBox2DEnabled || config.esp.cameraBox3DEnabled;
+	}
+
+	bool IsRatEspActive(const Config& config)
+	{
+		return config.esp.ratGlowEnabled || config.esp.ratBox2DEnabled || config.esp.ratBox3DEnabled;
+	}
+}
+
 static bool WorldToScreen(const SDK::FVector& world, ImVec2& screen)
 {
 	if (!Vars::MyController)
@@ -314,10 +337,10 @@ void Esp::RenderBulletTracers()
 void Esp::RenderEntityBoxes()
 {
 	const bool anyBoxesEnabled =
-		(manager->pConfig->esp.policeEspEnabled && (manager->pConfig->esp.policeBox2DEnabled || manager->pConfig->esp.policeBox3DEnabled)) ||
-		(manager->pConfig->esp.playerEspEnabled && (manager->pConfig->esp.playerBox2DEnabled || manager->pConfig->esp.playerBox3DEnabled)) ||
-		(manager->pConfig->esp.cameraEspEnabled && (manager->pConfig->esp.cameraBox2DEnabled || manager->pConfig->esp.cameraBox3DEnabled)) ||
-		(manager->pConfig->esp.ratEspEnabled && (manager->pConfig->esp.ratBox2DEnabled || manager->pConfig->esp.ratBox3DEnabled));
+		(IsPoliceEspActive(*manager->pConfig) && (manager->pConfig->esp.policeBox2DEnabled || manager->pConfig->esp.policeBox3DEnabled)) ||
+		(IsPlayerEspActive(*manager->pConfig) && (manager->pConfig->esp.playerBox2DEnabled || manager->pConfig->esp.playerBox3DEnabled)) ||
+		(IsCameraEspActive(*manager->pConfig) && (manager->pConfig->esp.cameraBox2DEnabled || manager->pConfig->esp.cameraBox3DEnabled)) ||
+		(IsRatEspActive(*manager->pConfig) && (manager->pConfig->esp.ratBox2DEnabled || manager->pConfig->esp.ratBox3DEnabled));
 
 	if (!anyBoxesEnabled)
 		return;
@@ -345,27 +368,27 @@ void Esp::RenderEntityBoxes()
 		if (cachedActor.type == TrackedActorType::Guard)
 		{
 			auto* guard = static_cast<SDK::ANPC_Guard_C*>(currActor);
-			shouldRender = manager->pConfig->esp.policeEspEnabled && !(filterDormant && guard->Dead_);
+			shouldRender = IsPoliceEspActive(*manager->pConfig) && !(filterDormant && guard->Dead_);
 		}
 		else if (cachedActor.type == TrackedActorType::Police)
 		{
 			auto* police = static_cast<SDK::ANPC_Police_base_C*>(currActor);
-			shouldRender = manager->pConfig->esp.policeEspEnabled && !(filterDormant && police->Dead_);
+			shouldRender = IsPoliceEspActive(*manager->pConfig) && !(filterDormant && police->Dead_);
 		}
 		else if (cachedActor.type == TrackedActorType::Player)
 		{
 			bool isLocalPlayer = currActor == Vars::CharacterClass || currActor->GetOwner() == Vars::MyController;
-			shouldRender = manager->pConfig->esp.playerEspEnabled && !isLocalPlayer;
+			shouldRender = IsPlayerEspActive(*manager->pConfig) && !isLocalPlayer;
 		}
 		else if (cachedActor.type == TrackedActorType::Camera)
 		{
 			auto* camera = static_cast<SDK::ACameraBP_C*>(currActor);
-			shouldRender = manager->pConfig->esp.cameraEspEnabled && !(filterDormant && camera->Destroyed_);
+			shouldRender = IsCameraEspActive(*manager->pConfig) && !(filterDormant && camera->Destroyed_);
 		}
 		else if (cachedActor.type == TrackedActorType::Rat)
 		{
 			auto* rat = static_cast<SDK::ARatCharacter_C*>(currActor);
-			shouldRender = manager->pConfig->esp.ratEspEnabled && !(filterDormant && rat->Dead_);
+			shouldRender = IsRatEspActive(*manager->pConfig) && !(filterDormant && rat->Dead_);
 		}
 
 		if (!shouldRender)

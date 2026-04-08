@@ -18,7 +18,7 @@ namespace
 			value = maxValue;
 	}
 
-	void DrawEspToggleRow(const char* label, bool& enabled, bool& glow, bool& box2D, bool& box3D)
+	void DrawEspToggleRow(const char* label, bool& glow, bool& box2D, bool& box3D)
 	{
 		ImGui::PushID(label);
 		ImGui::TableNextRow();
@@ -27,15 +27,12 @@ namespace
 		ImGui::TextUnformatted(label);
 
 		ImGui::TableSetColumnIndex(1);
-		ImGui::Checkbox("##enabled", &enabled);
-
-		ImGui::TableSetColumnIndex(2);
 		ImGui::Checkbox("##glow", &glow);
 
-		ImGui::TableSetColumnIndex(3);
+		ImGui::TableSetColumnIndex(2);
 		ImGui::Checkbox("##box2d", &box2D);
 
-		ImGui::TableSetColumnIndex(4);
+		ImGui::TableSetColumnIndex(3);
 		ImGui::Checkbox("##box3d", &box3D);
 		ImGui::PopID();
 	}
@@ -103,10 +100,9 @@ void Gui::RenderMainWindow()
 
 					ImGui::TableNextColumn();
 					ImGui::BeginChild("##visualsLeft", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding);
-					if (ImGui::BeginTable("espRows", 5, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_BordersOuter))
+					if (ImGui::BeginTable("espRows", 4, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_BordersOuter))
 					{
 						ImGui::TableSetupColumn("Actor");
-						ImGui::TableSetupColumn("Show");
 						ImGui::TableSetupColumn("Glow");
 						ImGui::TableSetupColumn("2D");
 						ImGui::TableSetupColumn("3D");
@@ -114,28 +110,41 @@ void Gui::RenderMainWindow()
 
 						DrawEspToggleRow(
 							"Police and Guards",
-							manager->pConfig->esp.policeEspEnabled,
 							manager->pConfig->esp.policeGlowEnabled,
 							manager->pConfig->esp.policeBox2DEnabled,
 							manager->pConfig->esp.policeBox3DEnabled);
 						DrawEspToggleRow(
 							"Players",
-							manager->pConfig->esp.playerEspEnabled,
 							manager->pConfig->esp.playerGlowEnabled,
 							manager->pConfig->esp.playerBox2DEnabled,
 							manager->pConfig->esp.playerBox3DEnabled);
 						DrawEspToggleRow(
 							"Cameras",
-							manager->pConfig->esp.cameraEspEnabled,
 							manager->pConfig->esp.cameraGlowEnabled,
 							manager->pConfig->esp.cameraBox2DEnabled,
 							manager->pConfig->esp.cameraBox3DEnabled);
 						DrawEspToggleRow(
 							"Rats",
-							manager->pConfig->esp.ratEspEnabled,
 							manager->pConfig->esp.ratGlowEnabled,
 							manager->pConfig->esp.ratBox2DEnabled,
 							manager->pConfig->esp.ratBox3DEnabled);
+
+						manager->pConfig->esp.policeEspEnabled =
+							manager->pConfig->esp.policeGlowEnabled ||
+							manager->pConfig->esp.policeBox2DEnabled ||
+							manager->pConfig->esp.policeBox3DEnabled;
+						manager->pConfig->esp.playerEspEnabled =
+							manager->pConfig->esp.playerGlowEnabled ||
+							manager->pConfig->esp.playerBox2DEnabled ||
+							manager->pConfig->esp.playerBox3DEnabled;
+						manager->pConfig->esp.cameraEspEnabled =
+							manager->pConfig->esp.cameraGlowEnabled ||
+							manager->pConfig->esp.cameraBox2DEnabled ||
+							manager->pConfig->esp.cameraBox3DEnabled;
+						manager->pConfig->esp.ratEspEnabled =
+							manager->pConfig->esp.ratGlowEnabled ||
+							manager->pConfig->esp.ratBox2DEnabled ||
+							manager->pConfig->esp.ratBox3DEnabled;
 
 						ImGui::EndTable();
 					}
@@ -202,6 +211,7 @@ void Gui::RenderMainWindow()
 					ImGui::BeginChild("##worldLeft", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding);
 					ImGui::Checkbox("Disable Cameras", &manager->pConfig->disableCameras.enabled);
 					ImGui::Checkbox("Disable Guard Check-In", &manager->pConfig->guardPhoneDelay.enabled);
+					ImGui::Checkbox("Instant Lockpick", &manager->pConfig->instantLockpick.enabled);
 
 					ImGui::Separator();
 					if (ImGui::Button("Unlock Doors", ImVec2(-FLT_MIN, 0.0f)))

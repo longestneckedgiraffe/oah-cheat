@@ -17,6 +17,7 @@ private:
 	void UnlimitedAmmo();
 	void GunMods();
 	void JumpHack();
+	void InstantLockpick();
 	void UnlockDoors();
 	void DisableAlarms();
 	void TeleportExploits();
