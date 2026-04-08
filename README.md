@@ -1,11 +1,12 @@
-# oah	
+# oah
 
 An efficient and simple .dll based injectable cheat for the game [One Armed Robber](https://steamdb.info/app/2551020/).
 
 ## Atribution
 
-- [oah](https://github.com/fluffysnaff/oah) (original source)
+- [minhook](https://github.com/tsudakageyu/minhook)
 - [dumper-7](https://github.com/Encryqed/Dumper-7)
+- [oah](https://github.com/fluffysnaff/oah) (original source)
 
 
 ## Disclaimer
