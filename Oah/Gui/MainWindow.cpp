@@ -36,6 +36,34 @@ namespace
 		ImGui::Checkbox("##box3d", &box3D);
 		ImGui::PopID();
 	}
+
+	const char* GetKeybindLabel(int key)
+	{
+		switch (key)
+		{
+		case VK_XBUTTON1:
+			return "XBUTTON1";
+		case VK_XBUTTON2:
+			return "XBUTTON2";
+		case VK_F1:
+			return "F1";
+		case VK_F2:
+			return "F2";
+		case VK_F3:
+			return "F3";
+		default:
+			return nullptr;
+		}
+	}
+
+	void DrawToggleKeybindText(const char* prefix, int key)
+	{
+		const char* keyLabel = GetKeybindLabel(key);
+		if (!keyLabel)
+			return;
+
+		ImGui::TextDisabled("%s%s.", prefix, keyLabel);
+	}
 }
 
 void Gui::RenderMainWindow()
@@ -62,13 +90,14 @@ void Gui::RenderMainWindow()
 
 					ImGui::TableNextColumn();
 					ImGui::BeginChild("##combatLeft", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding);
-					ImGui::Checkbox("Enable Aimbot", &manager->pConfig->aimbot.enabled);
+					ImGui::Checkbox("Aimbot", &manager->pConfig->aimbot.enabled);
 					if (manager->pConfig->aimbot.enabled)
 					{
+						ImGui::TextUnformatted("Field of View");
 						ImGui::SetNextItemWidth(-FLT_MIN);
-						ImGui::SliderFloat("Field of View", &manager->pConfig->aimbot.fov, 5.0f, 60.0f, "%.0f deg");
+						ImGui::SliderFloat("##AimbotFov", &manager->pConfig->aimbot.fov, 5.0f, 60.0f, "%.0f deg");
 						ImGui::Checkbox("Draw FOV Circle", &manager->pConfig->aimbot.showFov);
-						ImGui::Text("Hold XBUTTON1 while aiming.");
+						DrawToggleKeybindText("Hold ", VK_XBUTTON1);
 					}
 
 					ImGui::Separator();
@@ -172,26 +201,32 @@ void Gui::RenderMainWindow()
 
 					ImGui::TableNextColumn();
 					ImGui::BeginChild("##movementLeft", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding);
-					ImGui::Checkbox("Speed Hack", &manager->pConfig->speed.enabled);
+					ImGui::Checkbox("Speed", &manager->pConfig->speed.enabled);
 					if (manager->pConfig->speed.enabled)
 					{
 						ImGui::SetNextItemWidth(-FLT_MIN);
 						ImGui::SliderFloat("Walk Speed", &manager->pConfig->speed.speed, 300.0f, 2000.0f, "%.0f");
+						DrawToggleKeybindText("Toggle with ", manager->pConfig->speed.keyEnable);
 					}
 
-					ImGui::Checkbox("Jump Hack", &manager->pConfig->jumpHack.enabled);
+					ImGui::Checkbox("Jump", &manager->pConfig->jumpHack.enabled);
 					if (manager->pConfig->jumpHack.enabled)
 					{
 						ImGui::SetNextItemWidth(-FLT_MIN);
 						ImGui::SliderInt("Jump Strength", &manager->pConfig->jumpHack.value, 300, 800);
+						DrawToggleKeybindText("Toggle with ", manager->pConfig->jumpHack.keyEnable);
 					}
 					ImGui::EndChild();
 
 					ImGui::TableNextColumn();
 					ImGui::BeginChild("##movementRight", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding);
-					ImGui::Checkbox("Fly Hack", &manager->pConfig->flyHack.enabled);
+					ImGui::Checkbox("Fly", &manager->pConfig->flyHack.enabled);
+					if (manager->pConfig->flyHack.enabled)
+						DrawToggleKeybindText("Toggle with ", manager->pConfig->flyHack.keyEnable);
+
 					ImGui::Checkbox("Noclip", &manager->pConfig->noclip.enabled);
-					ImGui::Text("Toggle with XBUTTON2.");
+					if (manager->pConfig->noclip.enabled)
+						DrawToggleKeybindText("Toggle with ", VK_XBUTTON2);
 					ImGui::EndChild();
 
 					ImGui::EndTable();
@@ -276,8 +311,9 @@ void Gui::RenderMainWindow()
 
 					ImGui::TableNextColumn();
 					ImGui::BeginChild("##progressionLeft", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding);
+					ImGui::TextUnformatted("Target Level");
 					ImGui::SetNextItemWidth(-FLT_MIN);
-					ImGui::InputInt("Target Level", &manager->pConfig->levelHack.level, 1, 10);
+					ImGui::InputInt("##TargetLevel", &manager->pConfig->levelHack.level, 0, 0);
 					ClampInt(manager->pConfig->levelHack.level, 0, 9999);
 					if (ImGui::Button("Apply Level", ImVec2(-FLT_MIN, 0.0f)))
 						manager->pConfig->levelHack.setLevel = true;
@@ -285,8 +321,9 @@ void Gui::RenderMainWindow()
 
 					ImGui::TableNextColumn();
 					ImGui::BeginChild("##progressionRight", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding);
+					ImGui::TextUnformatted("Target Cash");
 					ImGui::SetNextItemWidth(-FLT_MIN);
-					ImGui::InputInt("Target Cash", &manager->pConfig->cashHack.cashValue, 1000, 100000);
+					ImGui::InputInt("##TargetCash", &manager->pConfig->cashHack.cashValue, 0, 0);
 					ClampInt(manager->pConfig->cashHack.cashValue, 0, INT_MAX);
 					if (ImGui::Button("Apply Cash", ImVec2(-FLT_MIN, 0.0f)))
 						manager->pConfig->cashHack.setCash = true;

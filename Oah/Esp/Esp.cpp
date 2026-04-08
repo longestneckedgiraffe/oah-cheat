@@ -10,6 +10,31 @@
 
 namespace
 {
+	bool IsGuardActor(SDK::AActor* actor)
+	{
+		return actor && actor->IsA(SDK::ANPC_Guard_C::StaticName());
+	}
+
+	bool IsPoliceActor(SDK::AActor* actor)
+	{
+		return actor && actor->IsA(SDK::ANPC_Police_base_C::StaticName());
+	}
+
+	bool IsPlayerActor(SDK::AActor* actor)
+	{
+		return actor && actor->IsA(SDK::APlayerCharacter_C::StaticName());
+	}
+
+	bool IsCameraActor(SDK::AActor* actor)
+	{
+		return actor && actor->IsA(SDK::ACameraBP_C::StaticName());
+	}
+
+	bool IsRatActor(SDK::AActor* actor)
+	{
+		return actor && actor->IsA(SDK::ARatCharacter_C::StaticName());
+	}
+
 	bool IsPoliceEspActive(const Config& config)
 	{
 		return config.esp.policeGlowEnabled || config.esp.policeBox2DEnabled || config.esp.policeBox3DEnabled;
@@ -97,23 +122,23 @@ void Esp::RefreshEspActorCache(bool forceRefresh, bool trackPolice, bool trackPl
 		if (Fns::IsBadPoint(currActor))
 			continue;
 
-		if (trackPolice && currActor->IsA(SDK::ANPC_Guard_C::StaticClass()))
+		if (trackPolice && IsGuardActor(currActor))
 		{
 			cachedEspActors.push_back({ currActor, TrackedActorType::Guard });
 		}
-		else if (trackPolice && currActor->IsA(SDK::ANPC_Police_base_C::StaticClass()))
+		else if (trackPolice && IsPoliceActor(currActor))
 		{
 			cachedEspActors.push_back({ currActor, TrackedActorType::Police });
 		}
-		else if (trackPlayers && currActor->IsA(SDK::APlayerCharacter_C::StaticClass()))
+		else if (trackPlayers && IsPlayerActor(currActor))
 		{
 			cachedEspActors.push_back({ currActor, TrackedActorType::Player });
 		}
-		else if (trackCameras && currActor->IsA(SDK::ACameraBP_C::StaticClass()))
+		else if (trackCameras && IsCameraActor(currActor))
 		{
 			cachedEspActors.push_back({ currActor, TrackedActorType::Camera });
 		}
-		else if (trackRats && currActor->IsA(SDK::ARatCharacter_C::StaticClass()))
+		else if (trackRats && IsRatActor(currActor))
 		{
 			cachedEspActors.push_back({ currActor, TrackedActorType::Rat });
 		}

@@ -15,6 +15,11 @@
 
 namespace
 {
+	bool IsBulletTraceActor(SDK::AActor* actor)
+	{
+		return actor && actor->IsA(SDK::ABulletTrace_C::StaticName());
+	}
+
 	bool IsPoliceEspActive(const Config& config)
 	{
 		return config.esp.policeGlowEnabled || config.esp.policeBox2DEnabled || config.esp.policeBox3DEnabled;
@@ -273,7 +278,7 @@ void Esp::UpdateBulletTracers()
 			continue;
 		if (Fns::IsBadPoint(currActor))
 			continue;
-		if (!currActor->IsA(SDK::ABulletTrace_C::StaticClass()))
+		if (!IsBulletTraceActor(currActor))
 			continue;
 
 		const std::uintptr_t actorKey = reinterpret_cast<std::uintptr_t>(currActor);
