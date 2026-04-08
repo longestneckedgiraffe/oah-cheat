@@ -40,6 +40,14 @@ public:
 		bool enabled{ false };
 	} noclip;
 
+	struct ThirdPerson
+	{
+		bool enabled{ false };
+		float back{ 360.f };
+		float right{ 0.f };
+		float up{ 90.f };
+	} thirdPerson;
+
 	struct LevelHack
 	{
 		bool setLevel{ false };
@@ -50,13 +58,6 @@ public:
 	{
 		bool enabled{ false };
 	} disableCameras;
-
-	struct GuardPhoneDelay
-	{
-		bool enabled{ false };
-	} guardPhoneDelay;
-
-
 
 	struct CashHack
 	{
@@ -113,6 +114,7 @@ public:
 		bool killPolice{ false };
 		bool killDoors{ false };
 		bool killCameras{ false };
+		bool moveMoneyToTruck{ false };
 	} teleportExploits;
 
 

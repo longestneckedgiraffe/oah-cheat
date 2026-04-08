@@ -13,12 +13,16 @@
 #include "../Libs/UEDump/SDK/CameraBP_classes.hpp"
 #include "../Libs/UEDump/SDK/AlertComponent_classes.hpp"
 #include "../Libs/UEDump/SDK/Armor_Light_classes.hpp"
+#include "../Libs/UEDump/SDK/BP_CarValueOverlapper_classes.hpp"
 #include "../Libs/UEDump/SDK/DoorBP_classes.hpp"
+#include "../Libs/UEDump/SDK/Duffelbag_classes.hpp"
 #include "../Libs/UEDump/SDK/AlarmBP_classes.hpp"
 #include "../Libs/UEDump/SDK/BP_HackingPoint_classes.hpp"
 #include "../Libs/UEDump/SDK/BP_Powerbox_classes.hpp"
 #include "../Libs/UEDump/SDK/Lock_classes.hpp"
 #include "../Libs/UEDump/SDK/Lock_pick_classes.hpp"
+#include "../Libs/UEDump/SDK/Money_base_classes.hpp"
+#include "../Libs/UEDump/SDK/RobberTruck_classes.hpp"
 
 SDK::FVector GetVectorForward(const SDK::FVector& angles);
 SDK::FVector GetVectorForward(const SDK::FRotator& angles);
@@ -38,7 +42,38 @@ namespace
 		WeaponAmmoState state{};
 	};
 
+	struct ThirdPersonState
+	{
+		SDK::APlayerCharacter_C* character{};
+		SDK::UCameraComponent* camera{};
+		SDK::USkeletalMeshComponent* mesh{};
+		SDK::FVector baseRelativeLocation{};
+		bool originalOwnerNoSee{};
+		bool initialized{ false };
+	};
+
 	static std::vector<TrackedWeaponAmmoState> g_trackedAmmoWeapons;
+	static ThirdPersonState g_thirdPersonState;
+
+	void RestoreThirdPersonState()
+	{
+		if (!g_thirdPersonState.initialized)
+			return;
+
+		__try
+		{
+			if (g_thirdPersonState.camera)
+				g_thirdPersonState.camera->K2_SetRelativeLocation(g_thirdPersonState.baseRelativeLocation, false, nullptr, true);
+
+			if (g_thirdPersonState.mesh)
+				g_thirdPersonState.mesh->SetOwnerNoSee(g_thirdPersonState.originalOwnerNoSee);
+		}
+		__except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION)
+		{
+		}
+
+		g_thirdPersonState = {};
+	}
 
 	SDK::AArmor_Light_C* GetEquippedArmorActor()
 	{
@@ -152,6 +187,87 @@ namespace
 			return false;
 		}
 	}
+
+	bool IsMoneyActor(SDK::AActor* actor)
+	{
+		return actor && actor->IsA(SDK::AMoney_base_C::StaticName());
+	}
+
+	bool IsCarValueOverlapperActor(SDK::AActor* actor)
+	{
+		return actor && actor->IsA(SDK::ABP_CarValueOverlapper_C::StaticName());
+	}
+
+	bool IsDuffelbagActor(SDK::AActor* actor)
+	{
+		return actor && actor->IsA(SDK::ADuffelbag_C::StaticName());
+	}
+
+	bool IsRobberTruckActor(SDK::AActor* actor)
+	{
+		return actor && actor->IsA(SDK::ARobberTruck_C::StaticName());
+	}
+
+	bool IsPickupHeld(SDK::APickupItem_base_C* pickup)
+	{
+		return pickup &&
+			pickup->PickupItemComponent &&
+			pickup->PickupItemComponent->Picked_up_;
+	}
+
+	SDK::ARobberTruck_C* FindRobberTruck(SDK::ULevel* currLevel)
+	{
+		if (!currLevel)
+			return nullptr;
+
+		for (int j = 0; j < currLevel->Actors.Num(); j++)
+		{
+			SDK::AActor* currActor = currLevel->Actors[j];
+			if (!currActor || !currActor->RootComponent)
+				continue;
+			if (Fns::IsBadPoint(currActor))
+				continue;
+			if (!IsRobberTruckActor(currActor))
+				continue;
+
+			return static_cast<SDK::ARobberTruck_C*>(currActor);
+		}
+
+		return nullptr;
+	}
+
+	SDK::FVector GetTruckMoneyDropLocation(SDK::ARobberTruck_C* truck, int index)
+	{
+		const SDK::FVector baseLocation =
+			(truck && truck->MoneyOverlapper)
+			? truck->MoneyOverlapper->K2_GetComponentLocation()
+			: truck->K2_GetActorLocation();
+
+		const SDK::FRotator truckRotation = truck ? truck->K2_GetActorRotation() : SDK::FRotator{};
+		const SDK::FVector right = GetVectorForward(SDK::FRotator{ 0.0f, truckRotation.Yaw + 90.0f, 0.0f });
+		const SDK::FVector forward = GetVectorForward(SDK::FRotator{ 0.0f, truckRotation.Yaw, 0.0f });
+
+		static constexpr int kColumns = 4;
+		static constexpr int kRows = 3;
+		static constexpr float kRightSpacing = 45.0f;
+		static constexpr float kForwardSpacing = 55.0f;
+		static constexpr float kLayerSpacing = 20.0f;
+
+		const int slot = index % (kColumns * kRows);
+		const int layer = index / (kColumns * kRows);
+		const int column = slot % kColumns;
+		const int row = slot / kColumns;
+
+		const float rightOffset = (static_cast<float>(column) - 1.5f) * kRightSpacing;
+		const float forwardOffset = (static_cast<float>(row) - 1.0f) * kForwardSpacing;
+		const float upOffset = 10.0f + (static_cast<float>(layer) * kLayerSpacing);
+
+		return
+			baseLocation +
+			(right * rightOffset) +
+			(forward * forwardOffset) +
+			SDK::FVector{ 0.0f, 0.0f, upOffset };
+	}
 }
 
 void Hacks::RunHacks()
@@ -161,12 +277,12 @@ void Hacks::RunHacks()
 
 	Aimbot();
 	DisableCameras();
-	GuardPhoneDelay();
 	SpeedHack();
 	LevelHack();
 	CashHack();
 	FlyHack();
 	Noclip();
+	ThirdPerson();
 	UnlimitedAmmo();
 	GunMods();
 	JumpHack();
@@ -367,23 +483,6 @@ void Hacks::DisableCameras()
 	}
 }
 
-void Hacks::GuardPhoneDelay()
-{
-	static bool phoneState = false;
-	if (!manager->pConfig->guardPhoneDelay.enabled)
-	{
-		if (phoneState)
-		{
-			Vars::CharacterClass->AddedGuardPhoneTime = 0;
-			phoneState = false;
-		}
-		return;
-	}
-
-	phoneState = true;
-	Vars::CharacterClass->AddedGuardPhoneTime = 99999;
-}
-
 void Hacks::SpeedHack()
 {
 	static bool speedState = false;
@@ -536,6 +635,70 @@ void Hacks::Noclip()
 			Vars::CharacterClass->CharacterMovement->MovementMode = SDK::EMovementMode::MOVE_Falling;
 
 		noclipState = false;
+	}
+}
+
+void Hacks::ThirdPerson()
+{
+	if (!manager->pConfig->thirdPerson.enabled)
+	{
+		RestoreThirdPersonState();
+		return;
+	}
+
+	if (!Vars::CharacterClass)
+	{
+		RestoreThirdPersonState();
+		return;
+	}
+
+	SDK::UCameraComponent* camera = Vars::CharacterClass->Camera;
+	SDK::USkeletalMeshComponent* mesh = Vars::CharacterClass->Mesh;
+	if (!camera || !mesh)
+	{
+		RestoreThirdPersonState();
+		return;
+	}
+
+	__try
+	{
+		if (!g_thirdPersonState.initialized ||
+			g_thirdPersonState.character != Vars::CharacterClass ||
+			g_thirdPersonState.camera != camera)
+		{
+			RestoreThirdPersonState();
+			g_thirdPersonState.character = Vars::CharacterClass;
+			g_thirdPersonState.camera = camera;
+			g_thirdPersonState.mesh = mesh;
+			g_thirdPersonState.baseRelativeLocation = camera->RelativeLocation;
+			g_thirdPersonState.originalOwnerNoSee = mesh->bOwnerNoSee;
+			g_thirdPersonState.initialized = true;
+		}
+
+		SDK::FVector anchorLocation = camera->K2_GetComponentLocation();
+		if (Vars::CharacterClass->CamDefaultLocation)
+			anchorLocation = Vars::CharacterClass->CamDefaultLocation->K2_GetComponentLocation();
+
+		SDK::FRotator cameraRotation = Vars::CharacterClass->K2_GetActorRotation();
+		if (Vars::MyController && Vars::MyController->PlayerCameraManager)
+			cameraRotation = Vars::MyController->PlayerCameraManager->GetCameraRotation();
+
+		const SDK::FRotator horizontalRotation{ 0.0f, cameraRotation.Yaw, 0.0f };
+		const SDK::FVector forward = GetVectorForward(horizontalRotation);
+		const SDK::FVector right = GetVectorForward(SDK::FRotator{ 0.0f, horizontalRotation.Yaw + 90.0f, 0.0f });
+
+		const SDK::FVector targetLocation =
+			anchorLocation -
+			(forward * manager->pConfig->thirdPerson.back) +
+			(right * manager->pConfig->thirdPerson.right) +
+			SDK::FVector{ 0.0f, 0.0f, manager->pConfig->thirdPerson.up };
+
+		camera->K2_SetWorldLocation(targetLocation, false, nullptr, true);
+		mesh->SetOwnerNoSee(false);
+	}
+	__except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION)
+	{
+		RestoreThirdPersonState();
 	}
 }
 
@@ -722,7 +885,8 @@ void Hacks::TeleportExploits()
 {
 	if (!manager->pConfig->teleportExploits.killCivilians && !manager->pConfig->teleportExploits.killRats &&
 		!manager->pConfig->teleportExploits.killPolice && !manager->pConfig->teleportExploits.killDoors &&
-		!manager->pConfig->teleportExploits.killCameras)
+		!manager->pConfig->teleportExploits.killCameras &&
+		!manager->pConfig->teleportExploits.moveMoneyToTruck)
 		return;
 	if (!Vars::MyController)
 		return;
@@ -735,6 +899,11 @@ void Hacks::TeleportExploits()
 	if (!currLevel)
 		return;
 
+	SDK::ARobberTruck_C* truck = nullptr;
+	if (manager->pConfig->teleportExploits.moveMoneyToTruck)
+		truck = FindRobberTruck(currLevel);
+
+	int truckMoneyIndex = 0;
 	for (int j = 0; j < currLevel->Actors.Num(); j++)
 	{
 		SDK::AActor* currActor = currLevel->Actors[j];
@@ -752,6 +921,28 @@ void Hacks::TeleportExploits()
 
 		SDK::FVector teleLocation = { -9999.f, 9999.f, 9999.f };
 		std::string fullName = currActor->GetFullName();
+		if (manager->pConfig->teleportExploits.moveMoneyToTruck && truck)
+		{
+			if (IsMoneyActor(currActor) && !IsCarValueOverlapperActor(currActor))
+			{
+				auto* money = static_cast<SDK::AMoney_base_C*>(currActor);
+				if (money->Value > 0 && !IsPickupHeld(money))
+				{
+					currActor->K2_TeleportTo(GetTruckMoneyDropLocation(truck, truckMoneyIndex++), currActor->K2_GetActorRotation());
+					continue;
+				}
+			}
+			else if (IsDuffelbagActor(currActor))
+			{
+				auto* duffelbag = static_cast<SDK::ADuffelbag_C*>(currActor);
+				if (duffelbag->AttachedActors.Num() > 0 && !IsPickupHeld(duffelbag))
+				{
+					currActor->K2_TeleportTo(GetTruckMoneyDropLocation(truck, truckMoneyIndex++), currActor->K2_GetActorRotation());
+					continue;
+				}
+			}
+		}
+
 		if (manager->pConfig->teleportExploits.killCivilians && fullName.find("Civilian_NPC") != std::string::npos)
 			currActor->K2_TeleportTo(teleLocation, SDK::FRotator{ 0, 0, 0 });
 		else if (manager->pConfig->teleportExploits.killRats && fullName.find("RatCharacter") != std::string::npos)
@@ -769,6 +960,7 @@ void Hacks::TeleportExploits()
 	manager->pConfig->teleportExploits.killRats = false;
 	manager->pConfig->teleportExploits.killDoors = false;
 	manager->pConfig->teleportExploits.killCameras = false;
+	manager->pConfig->teleportExploits.moveMoneyToTruck = false;
 }
 
 void Hacks::TieUpCivilians()

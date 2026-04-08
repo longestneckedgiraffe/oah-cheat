@@ -8,12 +8,12 @@ public:
 private:
 	void Aimbot();
 	void DisableCameras();
-	void GuardPhoneDelay();
 	void SpeedHack();
 	void LevelHack();
 	void CashHack();
 	void FlyHack();
 	void Noclip();
+	void ThirdPerson();
 	void UnlimitedAmmo();
 	void GunMods();
 	void JumpHack();

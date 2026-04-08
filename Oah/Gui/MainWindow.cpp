@@ -227,6 +227,23 @@ void Gui::RenderMainWindow()
 					ImGui::Checkbox("Noclip", &manager->pConfig->noclip.enabled);
 					if (manager->pConfig->noclip.enabled)
 						DrawToggleKeybindText("Toggle with ", VK_XBUTTON2);
+
+					ImGui::Separator();
+					ImGui::Checkbox("Third Person", &manager->pConfig->thirdPerson.enabled);
+					if (manager->pConfig->thirdPerson.enabled)
+					{
+						ImGui::TextUnformatted("Back");
+						ImGui::SetNextItemWidth(-FLT_MIN);
+						ImGui::SliderFloat("##ThirdPersonBack", &manager->pConfig->thirdPerson.back, 25.0f, 400.0f, "%.0f");
+
+						ImGui::TextUnformatted("Right");
+						ImGui::SetNextItemWidth(-FLT_MIN);
+						ImGui::SliderFloat("##ThirdPersonRight", &manager->pConfig->thirdPerson.right, -150.0f, 150.0f, "%.0f");
+
+						ImGui::TextUnformatted("Up");
+						ImGui::SetNextItemWidth(-FLT_MIN);
+						ImGui::SliderFloat("##ThirdPersonUp", &manager->pConfig->thirdPerson.up, -50.0f, 200.0f, "%.0f");
+					}
 					ImGui::EndChild();
 
 					ImGui::EndTable();
@@ -245,7 +262,6 @@ void Gui::RenderMainWindow()
 					ImGui::TableNextColumn();
 					ImGui::BeginChild("##worldLeft", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding);
 					ImGui::Checkbox("Disable Cameras", &manager->pConfig->disableCameras.enabled);
-					ImGui::Checkbox("Disable Guard Check-In", &manager->pConfig->guardPhoneDelay.enabled);
 					ImGui::Checkbox("Instant Lockpick", &manager->pConfig->instantLockpick.enabled);
 
 					ImGui::Separator();
@@ -290,7 +306,8 @@ void Gui::RenderMainWindow()
 						}
 
 						ImGui::TableNextColumn();
-						ImGui::Dummy(ImVec2(0.0f, 0.0f));
+						if (ImGui::Button("Move Money To Truck", ImVec2(-FLT_MIN, 0.0f)))
+							manager->pConfig->teleportExploits.moveMoneyToTruck = true;
 
 						ImGui::EndTable();
 					}

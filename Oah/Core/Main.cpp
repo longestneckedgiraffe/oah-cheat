@@ -109,9 +109,9 @@ DWORD WINAPI MainThread(HMODULE hmodule)
 			manager->pConfig->speed.enabled = false;
 			manager->pConfig->flyHack.enabled = false;
 			manager->pConfig->noclip.enabled = false;
+			manager->pConfig->thirdPerson.enabled = false;
 			manager->pConfig->jumpHack.enabled = false;
 			manager->pConfig->disableCameras.enabled = false;
-			manager->pConfig->guardPhoneDelay.enabled = false;
 			manager->pConfig->invulnerable.enabled = false;
 			manager->pConfig->maxHealth.enabled = false;
 			manager->pConfig->maxArmor.enabled = false;
