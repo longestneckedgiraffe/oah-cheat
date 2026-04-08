@@ -5,6 +5,7 @@
 #include <string>
 
 #include "Version.h"
+#include "RenderHook.h"
 #include "Manager.h"
 
 /*
@@ -12,27 +13,6 @@
 */
 
 std::unique_ptr<Manager> manager;
-
-static const char* KieroStatusToString(kiero::Status::Enum status)
-{
-	switch (status)
-	{
-	case kiero::Status::Success:
-		return "Success";
-	case kiero::Status::UnknownError:
-		return "UnknownError";
-	case kiero::Status::NotSupportedError:
-		return "NotSupportedError";
-	case kiero::Status::ModuleNotFoundError:
-		return "ModuleNotFoundError";
-	case kiero::Status::AlreadyInitializedError:
-		return "AlreadyInitializedError";
-	case kiero::Status::NotInitializedError:
-		return "NotInitializedError";
-	default:
-		return "UnmappedStatus";
-	}
-}
 
 DWORD WINAPI MainThread(HMODULE hmodule)
 {
@@ -57,9 +37,9 @@ DWORD WINAPI MainThread(HMODULE hmodule)
 	{
 		std::cout << "[" << step << "] " << result << std::endl;
 	};
-	auto logStatus = [](const char* step, kiero::Status::Enum status)
+	auto logStatus = [](const char* step, RenderHook::Status status)
 	{
-		std::cout << "[" << step << "] " << KieroStatusToString(status)
+		std::cout << "[" << step << "] " << RenderHook::StatusToString(status)
 			<< " (" << static_cast<int>(status) << ")" << std::endl;
 	};
 	auto closeConsoleIfNeeded = [&](bool forceClose)
@@ -80,34 +60,25 @@ DWORD WINAPI MainThread(HMODULE hmodule)
 	logStep("Console", consoleCreated ? "Allocated" : "Allocation failed");
 	logStep("Loader", "Starting initialization");
 
+	manager = std::make_unique<Manager>();
+	if (!manager || !manager->pGui || !manager->pConfig || !manager->pHacks || !manager->pEsp)
+	{
+		keepConsoleOpen = true;
+		logStep("Manager", "Failed to construct core objects");
+		return TRUE;
+	}
+	logStep("Manager", "Constructed core objects");
+
 	bool initHook = false;
 	int initAttempts = 0;
 	while (!initHook)
 	{
 		initAttempts++;
-		const kiero::Status::Enum initStatus = kiero::init(kiero::RenderType::D3D11);
-		if (initStatus == kiero::Status::Success)
+		const RenderHook::Status initStatus =
+			RenderHook::Initialize(manager->pGui->HkPresent, &manager->pGui->oPresent);
+		if (initStatus == RenderHook::Status::Success)
 		{
-			logStatus("Kiero::init", initStatus);
-
-			manager = std::make_unique<Manager>();
-			if (!manager || !manager->pGui || !manager->pConfig || !manager->pHacks || !manager->pEsp)
-			{
-				keepConsoleOpen = true;
-				logStep("Manager", "Failed to construct core objects");
-				return TRUE;
-			}
-			logStep("Manager", "Constructed core objects");
-
-			const kiero::Status::Enum bindStatus =
-				kiero::bind(8, (void**)&manager->pGui->oPresent, manager->pGui->HkPresent);
-			if (bindStatus != kiero::Status::Success)
-			{
-				keepConsoleOpen = true;
-				logStatus("Kiero::bind", bindStatus);
-				return TRUE;
-			}
-			logStatus("Kiero::bind", bindStatus);
+			logStatus("RenderHook::Initialize", initStatus);
 
 			if (manager->UpdateSDK())
 				logStep("SDK", "Ready");
@@ -119,7 +90,7 @@ DWORD WINAPI MainThread(HMODULE hmodule)
 		else
 		{
 			if (initAttempts == 1 || initAttempts % 200 == 0)
-				logStatus("Kiero::init", initStatus);
+				logStatus("RenderHook::Initialize", initStatus);
 			if (initAttempts > 200)
 				keepConsoleOpen = true;
 			Sleep(10);
@@ -168,8 +139,7 @@ DWORD WINAPI MainThread(HMODULE hmodule)
 			if (!manager->pGui->cleanupDone && manager->pGui->activePresentCalls == 0)
 				manager->pGui->Cleanup();
 
-			kiero::unbind(8);
-			kiero::shutdown();
+			RenderHook::Shutdown();
 
 			for (int i = 0; i < 500 && manager->pGui->activePresentCalls > 0; i++)
 				Sleep(10);

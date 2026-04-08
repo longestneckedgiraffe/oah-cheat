@@ -5,12 +5,12 @@
 class Gui
 {
 public:
-	Present oPresent;
+	Present oPresent = nullptr;
 	HWND window = NULL;
-	WNDPROC oWndProc;
+	WNDPROC oWndProc = nullptr;
 	ID3D11Device* pDevice = NULL;
 	ID3D11DeviceContext* pContext = NULL;
-	ID3D11RenderTargetView* mainRenderTargetView;
+	ID3D11RenderTargetView* mainRenderTargetView = NULL;
 
 	bool initDx = false;
 	bool cleanupDone = false;

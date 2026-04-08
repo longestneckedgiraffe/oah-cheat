@@ -158,6 +158,7 @@
     <ClCompile Include="Core\Config.cpp" />
     <ClCompile Include="Core\Main.cpp" />
     <ClCompile Include="Core\Manager.cpp" />
+    <ClCompile Include="Core\RenderHook.cpp" />
     <ClCompile Include="Esp\Esp.cpp" />
     <ClCompile Include="Esp\EspBase.cpp" />
     <ClCompile Include="Gui\Gui.cpp" />
@@ -171,12 +172,11 @@
     <ClCompile Include="Libs\ImGui\imgui_impl_win32.cpp" />
     <ClCompile Include="Libs\ImGui\imgui_widgets.cpp" />
     <ClCompile Include="Libs\ImGui\imgui_tables.cpp" />
-    <ClCompile Include="Libs\Kiero\kiero.cpp" />
-    <ClCompile Include="Libs\Kiero\minhook\src\buffer.c" />
-    <ClCompile Include="Libs\Kiero\minhook\src\hde\hde32.c" />
-    <ClCompile Include="Libs\Kiero\minhook\src\hde\hde64.c" />
-    <ClCompile Include="Libs\Kiero\minhook\src\hook.c" />
-    <ClCompile Include="Libs\Kiero\minhook\src\trampoline.c" />
+    <ClCompile Include="Libs\MinHook\src\buffer.c" />
+    <ClCompile Include="Libs\MinHook\src\hde\hde32.c" />
+    <ClCompile Include="Libs\MinHook\src\hde\hde64.c" />
+    <ClCompile Include="Libs\MinHook\src\hook.c" />
+    <ClCompile Include="Libs\MinHook\src\trampoline.c" />
     <ClCompile Include="Libs\UEDump\SDK\ActorLayerUtilities_functions.cpp" />
     <ClCompile Include="Libs\UEDump\SDK\AdvancedSessions_functions.cpp" />
     <ClCompile Include="Libs\UEDump\SDK\AdvancedSteamSessions_functions.cpp" />
@@ -516,16 +516,17 @@
     <ClCompile Include="Libs\UEDump\SDK\menuUIInteraface_functions.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="Libs\Kiero\minhook\dll_resources\MinHook.def" />
+    <None Include="Libs\MinHook\dll_resources\MinHook.def" />
     <None Include="Libs\UEDump\Assertions.inl" />
     <None Include="Libs\UEDump\NameCollisions.inl" />
   </ItemGroup>
   <ItemGroup>
-    <ResourceCompile Include="Libs\Kiero\minhook\dll_resources\MinHook.rc" />
+    <ResourceCompile Include="Libs\MinHook\dll_resources\MinHook.rc" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Core\Config.h" />
     <ClInclude Include="Core\Manager.h" />
+    <ClInclude Include="Core\RenderHook.h" />
     <ClInclude Include="Core\Variables.h" />
     <ClInclude Include="Core\Version.h" />
     <ClInclude Include="Esp\Esp.h" />
@@ -542,15 +543,14 @@
     <ClInclude Include="Libs\ImGui\imstb_textedit.h" />
     <ClInclude Include="Libs\ImGui\imstb_truetype.h" />
     <ClInclude Include="Libs\Includes.h" />
-    <ClInclude Include="Libs\Kiero\kiero.h" />
-    <ClInclude Include="Libs\Kiero\minhook\include\MinHook.h" />
-    <ClInclude Include="Libs\Kiero\minhook\src\buffer.h" />
-    <ClInclude Include="Libs\Kiero\minhook\src\hde\hde32.h" />
-    <ClInclude Include="Libs\Kiero\minhook\src\hde\hde64.h" />
-    <ClInclude Include="Libs\Kiero\minhook\src\hde\pstdint.h" />
-    <ClInclude Include="Libs\Kiero\minhook\src\hde\table32.h" />
-    <ClInclude Include="Libs\Kiero\minhook\src\hde\table64.h" />
-    <ClInclude Include="Libs\Kiero\minhook\src\trampoline.h" />
+    <ClInclude Include="Libs\MinHook\include\MinHook.h" />
+    <ClInclude Include="Libs\MinHook\src\buffer.h" />
+    <ClInclude Include="Libs\MinHook\src\hde\hde32.h" />
+    <ClInclude Include="Libs\MinHook\src\hde\hde64.h" />
+    <ClInclude Include="Libs\MinHook\src\hde\pstdint.h" />
+    <ClInclude Include="Libs\MinHook\src\hde\table32.h" />
+    <ClInclude Include="Libs\MinHook\src\hde\table64.h" />
+    <ClInclude Include="Libs\MinHook\src\trampoline.h" />
     <ClInclude Include="Libs\UEDump\PropertyFixup.hpp" />
     <ClInclude Include="Libs\UEDump\SDK.hpp" />
     <ClInclude Include="Libs\UEDump\SDK\ActorLayerUtilities_classes.hpp" />
