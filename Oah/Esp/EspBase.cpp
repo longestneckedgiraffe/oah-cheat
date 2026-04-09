@@ -39,6 +39,50 @@ namespace
 	{
 		return config.esp.ratGlowEnabled || config.esp.ratBox2DEnabled || config.esp.ratBox3DEnabled;
 	}
+
+	ImU32 ToImU32(const float color[4])
+	{
+		return ImGui::ColorConvertFloat4ToU32(ImVec4(color[0], color[1], color[2], color[3]));
+	}
+
+	bool IsCameraMeshRecentlyRendered(SDK::ACameraBP_C* camera)
+	{
+		if (!camera)
+			return false;
+
+		static constexpr float kRecentRenderTolerance = 0.06f;
+
+		if (camera->CameraHead &&
+			SDK::UKismetSystemLibrary::IsValid(camera->CameraHead) &&
+			camera->CameraHead->WasRecentlyRendered(kRecentRenderTolerance))
+		{
+			return true;
+		}
+
+		if (camera->CameraArm &&
+			SDK::UKismetSystemLibrary::IsValid(camera->CameraArm) &&
+			camera->CameraArm->WasRecentlyRendered(kRecentRenderTolerance))
+		{
+			return true;
+		}
+
+		return camera->WasRecentlyRendered(kRecentRenderTolerance);
+	}
+
+	ImU32 GetBoxColor(const Config& config, SDK::APlayerController* controller, SDK::AActor* actor, const SDK::FVector& viewPoint)
+	{
+		if (!config.esp.visibilityCheckEnabled || !controller || !actor)
+			return ToImU32(config.esp.defaultBoxColor);
+
+		const bool isVisible =
+			actor->IsA(SDK::ACameraBP_C::StaticName())
+			? IsCameraMeshRecentlyRendered(static_cast<SDK::ACameraBP_C*>(actor))
+			: controller->LineOfSightTo(actor, viewPoint, false);
+
+		return isVisible
+			? ToImU32(config.esp.visibleBoxColor)
+			: ToImU32(config.esp.hiddenBoxColor);
+	}
 }
 
 static bool WorldToScreen(const SDK::FVector& world, ImVec2& screen)
@@ -354,9 +398,9 @@ void Esp::RenderEntityBoxes()
 	if (cachedEspActors.empty())
 		return;
 
+	const Config& config = *manager->pConfig;
 	const bool filterDormant = manager->pConfig->settings.filterDormant;
 	auto* drawList = ImGui::GetBackgroundDrawList();
-	const ImU32 boxColor = IM_COL32(255, 255, 255, 210);
 	const SDK::FVector cameraLocation = Vars::MyController->PlayerCameraManager->GetCameraLocation();
 	static constexpr float kMaxEspDistance = 20000.0f;
 	const float maxDistSq = kMaxEspDistance * kMaxEspDistance;
@@ -456,6 +500,7 @@ void Esp::RenderEntityBoxes()
 			hasProjectedBounds = GetProjectedBounds(origin, extent, screenCorners, minPoint, maxPoint);
 		}
 
+		const ImU32 boxColor = GetBoxColor(config, Vars::MyController, currActor, cameraLocation);
 		if (draw2D && (has2DRect || hasProjectedBounds))
 			drawList->AddRect(minPoint, maxPoint, boxColor, 0.0f, 0, 1.0f);
 		if (draw3D && hasProjectedBounds)

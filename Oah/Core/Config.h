@@ -153,6 +153,10 @@ public:
 
 	struct Esp
 	{
+		bool visibilityCheckEnabled{ false };
+		float defaultBoxColor[4]{ 1.0f, 1.0f, 1.0f, 210.0f / 255.0f };
+		float hiddenBoxColor[4]{ 0.0f, 1.0f, 0.0f, 210.0f / 255.0f };
+		float visibleBoxColor[4]{ 1.0f, 0.0f, 0.0f, 210.0f / 255.0f };
 		bool policeEspEnabled{ false };
 		bool policeGlowEnabled{ true };
 		bool policeBox2DEnabled{ false };

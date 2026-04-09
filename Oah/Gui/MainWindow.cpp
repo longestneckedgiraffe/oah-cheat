@@ -183,6 +183,11 @@ void Gui::RenderMainWindow()
 					ImGui::BeginChild("##visualsRight", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding);
 					ImGui::Checkbox("Bullet Tracers", &manager->pConfig->esp.bulletTracersEnabled);
 					ImGui::Separator();
+					ImGui::Checkbox("Visibility Check", &manager->pConfig->esp.visibilityCheckEnabled);
+					ImGui::ColorEdit4("Default Box", manager->pConfig->esp.defaultBoxColor);
+					ImGui::ColorEdit4("Hidden Box", manager->pConfig->esp.hiddenBoxColor);
+					ImGui::ColorEdit4("Visible Box", manager->pConfig->esp.visibleBoxColor);
+					ImGui::Separator();
 					ImGui::Checkbox("Dormant", &manager->pConfig->settings.filterDormant);
 					ImGui::EndChild();
 
