@@ -7,6 +7,7 @@
 #include "Version.h"
 #include "RenderHook.h"
 #include "Manager.h"
+#include "Variables.h"
 
 /*
 	An efficient and simple .dll based injectable cheat for the game One Armed Robber
@@ -44,7 +45,7 @@ DWORD WINAPI MainThread(HMODULE hmodule)
 	};
 	auto closeConsoleIfNeeded = [&](bool forceClose)
 	{
-		if (!forceClose || keepConsoleOpen)
+		if (!forceClose || keepConsoleOpen || Vars::Debug)
 			return;
 
 		if (consoleFile)
@@ -58,6 +59,8 @@ DWORD WINAPI MainThread(HMODULE hmodule)
 	};
 
 	logStep("Console", consoleCreated ? "Allocated" : "Allocation failed");
+	if (Vars::Debug)
+		keepConsoleOpen = true;
 	logStep("Loader", "Starting initialization");
 
 	manager = std::make_unique<Manager>();
@@ -97,7 +100,7 @@ DWORD WINAPI MainThread(HMODULE hmodule)
 		}
 	}
 
-	logStep("Loader", keepConsoleOpen ? "Initialized with hitch; console will remain open" : "Initialization complete");
+	logStep("Loader", keepConsoleOpen ? "Initialization complete; console will remain open" : "Initialization complete");
 	if (!keepConsoleOpen)
 		Sleep(1000);
 	closeConsoleIfNeeded(true);
@@ -127,12 +130,16 @@ DWORD WINAPI MainThread(HMODULE hmodule)
 			manager->pConfig->esp.cameraEspEnabled = false;
 			manager->pConfig->esp.ratEspEnabled = false;
 			manager->pConfig->menu.enabled = false;
+			manager->pConfig->menu.injected = false;
 
-			Sleep(200);
+			for (int i = 0; i < 100; i++)
+			{
+				if (manager->pGui->cleanupDone || manager->pGui->activePresentCalls == 0)
+					break;
+				Sleep(10);
+			}
 
 			manager->pEsp->DisableAll();
-
-			manager->pConfig->menu.injected = false;
 
 			for (int i = 0; i < 500 && !manager->pGui->cleanupDone; i++)
 				Sleep(10);

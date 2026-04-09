@@ -10,8 +10,8 @@
 
 #include "Basic.hpp"
 
-#include "AttachmentArrayStructure_structs.hpp"
 #include "ShopItemCategory_structs.hpp"
+#include "AttachmentArrayStructure_structs.hpp"
 
 
 namespace SDK::Params

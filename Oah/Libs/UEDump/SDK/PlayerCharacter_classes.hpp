@@ -10,13 +10,13 @@
 
 #include "Basic.hpp"
 
+#include "SteamCore_structs.hpp"
+#include "SettingsStruct_structs.hpp"
 #include "PhysicsCore_structs.hpp"
 #include "Engine_structs.hpp"
 #include "Engine_classes.hpp"
-#include "AttachmentArrayStructure_structs.hpp"
 #include "CoreUObject_structs.hpp"
-#include "SteamCore_structs.hpp"
-#include "SettingsStruct_structs.hpp"
+#include "AttachmentArrayStructure_structs.hpp"
 
 
 namespace SDK

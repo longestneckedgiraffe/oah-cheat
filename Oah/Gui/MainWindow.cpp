@@ -189,6 +189,8 @@ void Gui::RenderMainWindow()
 					ImGui::ColorEdit4("Default Box", manager->pConfig->esp.defaultBoxColor);
 					ImGui::ColorEdit4("Hidden Box", manager->pConfig->esp.hiddenBoxColor);
 					ImGui::ColorEdit4("Visible Box", manager->pConfig->esp.visibleBoxColor);
+					ImGui::Dummy(ImVec2(0.0f, 8.0f));
+					ImGui::ColorEdit4("Glow Color", manager->pConfig->esp.glowColor);
 					ImGui::Separator();
 					ImGui::Checkbox("Dormant", &manager->pConfig->settings.filterDormant);
 					ImGui::EndChild();

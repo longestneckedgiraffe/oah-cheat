@@ -3,7 +3,12 @@
 #include "../Libs/UEDump/SDK.hpp"
 
 namespace Vars {
-	inline bool Debug = true;
+	inline bool Debug =
+#ifdef _DEBUG
+		true;
+#else
+		false;
+#endif
 	inline bool ShowMenu = true;
 
 	inline SDK::UEngine* Engine{};

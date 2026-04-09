@@ -1,6 +1,8 @@
 #include "../Core/Manager.h"
 #include "Esp.h"
 
+#include <vector>
+
 #include "../Libs/UEDump/SDK/CameraBP_classes.hpp"
 #include "../Libs/UEDump/SDK/BulletTrace_classes.hpp"
 #include "../Libs/UEDump/SDK/NPC_Guard_classes.hpp"
@@ -10,6 +12,8 @@
 
 namespace
 {
+	static constexpr int kGlowStencilValue = 0;
+
 	bool IsGuardActor(SDK::AActor* actor)
 	{
 		return actor && actor->IsA(SDK::ANPC_Guard_C::StaticName());
@@ -72,12 +76,274 @@ namespace
 			(IsCameraEspActive(config) && config.esp.cameraGlowEnabled) ||
 			(IsRatEspActive(config) && config.esp.ratGlowEnabled);
 	}
+
+	SDK::FLinearColor ToLinearColor(const float color[4])
+	{
+		return SDK::FLinearColor{ color[0], color[1], color[2], color[3] };
+	}
+
+	void GetGlowColors(const Config& config, SDK::FLinearColor& primaryColor, SDK::FLinearColor& secondaryColor)
+	{
+		primaryColor = ToLinearColor(config.esp.glowColor);
+		secondaryColor = primaryColor;
+	}
+
+	bool AreSameColor(const SDK::FLinearColor& lhs, const SDK::FLinearColor& rhs)
+	{
+		return
+			lhs.R == rhs.R &&
+			lhs.G == rhs.G &&
+			lhs.B == rhs.B &&
+			lhs.A == rhs.A;
+	}
+
+	void ApplyGlowToPrimitive(SDK::UPrimitiveComponent* component, bool enabling, int stencilValue)
+	{
+		if (!component)
+			return;
+
+		__try
+		{
+			if (!SDK::UKismetSystemLibrary::IsValid(component))
+				return;
+
+			component->SetRenderCustomDepth(enabling);
+			if (enabling)
+				component->SetCustomDepthStencilValue(stencilValue);
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+		}
+	}
+
+	void DisableGlowOnPrimitive(SDK::UPrimitiveComponent* component)
+	{
+		if (!component)
+			return;
+
+		__try
+		{
+			if (!SDK::UKismetSystemLibrary::IsValid(component))
+				return;
+
+			component->SetRenderCustomDepth(false);
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+		}
+	}
+
+	void DestroyCameraProxyPrimitive(SDK::UStaticMeshComponent*& component)
+	{
+		if (!component)
+			return;
+
+		__try
+		{
+			if (SDK::UKismetSystemLibrary::IsValid(component))
+			{
+				component->SetRenderCustomDepth(false);
+				component->bRenderInDepthPass = false;
+				component->SetRenderInMainPass(false);
+				component->SetCollisionEnabled(SDK::ECollisionEnabled::NoCollision);
+
+				if (SDK::AActor* owner = component->GetOwner())
+					owner->K2_DestroyComponent(component);
+			}
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+		}
+
+		component = nullptr;
+	}
+
+	SDK::TArray<SDK::FWeightedBlendable>* GetBlendablesForOwner(Esp::GlowBlendableOwnerType ownerType, SDK::UObject* owner)
+	{
+		if (!owner)
+			return nullptr;
+
+		__try
+		{
+			switch (ownerType)
+			{
+			case Esp::GlowBlendableOwnerType::Camera:
+				return &static_cast<SDK::UCameraComponent*>(owner)->PostProcessSettings.WeightedBlendables.Array;
+			case Esp::GlowBlendableOwnerType::PostProcessVolume:
+				return &static_cast<SDK::APostProcessVolume*>(owner)->Settings.WeightedBlendables.Array;
+			default:
+				return nullptr;
+			}
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			return nullptr;
+		}
+	}
+
+	bool IsTargetGlowBlendableMaterial(SDK::UMaterialInterface* material)
+	{
+		if (!material)
+			return false;
+
+		return material->GetFullName().find("HighlightMat_Inst") != std::string::npos;
+	}
+
+	void ApplyGlowColorToMaterial(
+		SDK::UMaterialInstanceDynamic* material,
+		const SDK::FLinearColor& primaryColor,
+		const SDK::FLinearColor& secondaryColor)
+	{
+		if (!material)
+			return;
+
+		static SDK::FName colorName{};
+		static SDK::FName color1Name{};
+
+		material->SetVectorParameterValue(SDK::GetStaticName(L"Color", colorName), primaryColor);
+		material->SetVectorParameterValue(SDK::GetStaticName(L"Color1", color1Name), secondaryColor);
+	}
+
+	SDK::UMaterialInstanceDynamic* CreateGlowOverrideMaterial(SDK::UMaterialInterface* sourceMaterial)
+	{
+		if (!Vars::World || !sourceMaterial)
+			return nullptr;
+
+		SDK::UMaterialInstanceDynamic* dynamicMaterial =
+			SDK::UKismetMaterialLibrary::CreateDynamicMaterialInstance(
+				Vars::World,
+				sourceMaterial,
+				SDK::FName{},
+				SDK::EMIDCreationFlags::Transient);
+
+		if (!dynamicMaterial)
+			return nullptr;
+
+		dynamicMaterial->K2_CopyMaterialInstanceParameters(sourceMaterial, false);
+		return dynamicMaterial;
+	}
+}
+
+SDK::UStaticMeshComponent* Esp::CreateCameraProxyMesh(SDK::ACameraBP_C* camera, SDK::UStaticMeshComponent* source, int stencilValue)
+{
+	if (!camera || !source)
+		return nullptr;
+
+	if (!SDK::UKismetSystemLibrary::IsValid(camera) || !SDK::UKismetSystemLibrary::IsValid(source))
+		return nullptr;
+
+	SDK::FTransform identity{};
+	identity.Rotation.X = 0.f;
+	identity.Rotation.Y = 0.f;
+	identity.Rotation.Z = 0.f;
+	identity.Rotation.W = 1.f;
+	identity.Translation.X = 0.f;
+	identity.Translation.Y = 0.f;
+	identity.Translation.Z = 0.f;
+	identity.Scale3D.X = 1.f;
+	identity.Scale3D.Y = 1.f;
+	identity.Scale3D.Z = 1.f;
+
+	auto* proxy = static_cast<SDK::UStaticMeshComponent*>(
+		camera->AddComponentByClass(
+			SDK::UStaticMeshComponent::StaticClass(),
+			true,
+			identity,
+			true
+		)
+	);
+
+	if (!proxy)
+		return nullptr;
+
+	proxy->SetStaticMesh(source->StaticMesh);
+
+	const int numMats = source->GetNumMaterials();
+	for (int i = 0; i < numMats; i++)
+	{
+		SDK::UMaterialInterface* mat = source->GetMaterial(i);
+		if (mat)
+			proxy->SetMaterial(i, mat);
+	}
+
+	proxy->SetRenderInMainPass(false);
+	proxy->bRenderInDepthPass = false;
+	proxy->SetRenderCustomDepth(true);
+	proxy->SetCustomDepthStencilValue(stencilValue);
+	proxy->SetCollisionEnabled(SDK::ECollisionEnabled::NoCollision);
+	proxy->SetCastShadow(false);
+	proxy->SetReceivesDecals(false);
+
+	camera->FinishAddComponent(proxy, true, identity);
+
+	static SDK::FName emptySocket{};
+	proxy->K2_AttachToComponent(
+		source,
+		emptySocket,
+		SDK::EAttachmentRule::SnapToTarget,
+		SDK::EAttachmentRule::SnapToTarget,
+		SDK::EAttachmentRule::SnapToTarget,
+		false
+	);
+
+	return proxy;
+}
+
+void Esp::EnsureCameraProxies(SDK::ACameraBP_C* camera, bool enabling, int stencilValue)
+{
+	if (!camera)
+		return;
+
+	const std::uintptr_t key = reinterpret_cast<std::uintptr_t>(camera);
+
+	if (!enabling)
+	{
+		auto it = cameraProxies.find(key);
+		if (it != cameraProxies.end())
+		{
+			DestroyCameraProxyPrimitive(it->second.head);
+			DestroyCameraProxyPrimitive(it->second.arm);
+			cameraProxies.erase(it);
+		}
+		return;
+	}
+
+	CameraProxyMeshes& proxies = cameraProxies[key];
+
+	if (!proxies.head || !SDK::UKismetSystemLibrary::IsValid(proxies.head))
+	{
+		if (camera->CameraHead && SDK::UKismetSystemLibrary::IsValid(camera->CameraHead))
+			proxies.head = CreateCameraProxyMesh(camera, camera->CameraHead, stencilValue);
+	}
+
+	if (!proxies.arm || !SDK::UKismetSystemLibrary::IsValid(proxies.arm))
+	{
+		if (camera->CameraArm && SDK::UKismetSystemLibrary::IsValid(camera->CameraArm))
+			proxies.arm = CreateCameraProxyMesh(camera, camera->CameraArm, stencilValue);
+	}
+
+	if (proxies.head && SDK::UKismetSystemLibrary::IsValid(proxies.head))
+		ApplyGlowToPrimitive(proxies.head, true, stencilValue);
+
+	if (proxies.arm && SDK::UKismetSystemLibrary::IsValid(proxies.arm))
+		ApplyGlowToPrimitive(proxies.arm, true, stencilValue);
+}
+
+void Esp::CleanupAllCameraProxies()
+{
+	for (auto& entry : cameraProxies)
+	{
+		DestroyCameraProxyPrimitive(entry.second.head);
+		DestroyCameraProxyPrimitive(entry.second.arm);
+	}
+	cameraProxies.clear();
 }
 
 void Esp::RefreshEspActorCache(bool forceRefresh, bool trackPolice, bool trackPlayers, bool trackCameras, bool trackRats)
 {
 	if (!trackPolice && !trackPlayers && !trackCameras && !trackRats)
 	{
+		CleanupAllCameraProxies();
 		cachedEspActors.clear();
 		cachedEspLevel = nullptr;
 		actorCacheFrameCounter = 0;
@@ -86,6 +352,7 @@ void Esp::RefreshEspActorCache(bool forceRefresh, bool trackPolice, bool trackPl
 
 	if (!Vars::World || Vars::World->Levels.Num() == 0)
 	{
+		CleanupAllCameraProxies();
 		cachedEspActors.clear();
 		cachedEspLevel = nullptr;
 		actorCacheFrameCounter = 0;
@@ -95,6 +362,7 @@ void Esp::RefreshEspActorCache(bool forceRefresh, bool trackPolice, bool trackPl
 	SDK::ULevel* currLevel = Vars::World->Levels[0];
 	if (!currLevel)
 	{
+		CleanupAllCameraProxies();
 		cachedEspActors.clear();
 		cachedEspLevel = nullptr;
 		actorCacheFrameCounter = 0;
@@ -102,12 +370,14 @@ void Esp::RefreshEspActorCache(bool forceRefresh, bool trackPolice, bool trackPl
 	}
 
 	actorCacheFrameCounter++;
-	const bool refreshNow = forceRefresh ||
-		cachedEspLevel != currLevel ||
-		actorCacheFrameCounter >= 120;
+	const bool levelChanged = cachedEspLevel != currLevel;
+	const bool refreshNow = forceRefresh || levelChanged || actorCacheFrameCounter >= 120;
 
 	if (!refreshNow)
 		return;
+
+	if (levelChanged)
+		CleanupAllCameraProxies();
 
 	cachedEspActors.clear();
 	cachedEspActors.reserve(256);
@@ -214,6 +484,11 @@ void Esp::Tick()
 	else
 		RefreshEspActorCache(false, false, false, false, false);
 
+	if (anyGlowEnabled)
+		ApplyGlowColorOverride();
+	else
+		RestoreGlowColorOverride();
+
 	bool shouldRun = false;
 	if (stateChanged)
 	{
@@ -267,85 +542,214 @@ void Esp::ApplyGlow()
 		return;
 	if (!Vars::World || Vars::World->Levels.Num() == 0)
 		return;
+	if (!manager || !manager->pConfig)
+		return;
 
-	const bool filterDormant = manager->pConfig->settings.filterDormant;
+	const Config& config = *manager->pConfig;
+	const bool filterDormant = config.settings.filterDormant;
 
 	for (const CachedEspActor& cachedActor : cachedEspActors)
 	{
-		SDK::AActor* currActor = cachedActor.actor;
-		if (!currActor || !currActor->RootComponent)
-			continue;
-		if (Fns::IsBadPoint(currActor))
-			continue;
+		__try
+		{
+			SDK::AActor* currActor = cachedActor.actor;
+			if (!currActor || !currActor->RootComponent)
+				continue;
+			if (Fns::IsBadPoint(currActor) || !SDK::UKismetSystemLibrary::IsValid(currActor))
+				continue;
 
-		if (cachedActor.type == TrackedActorType::Guard)
-		{
-			auto* guard = static_cast<SDK::ANPC_Guard_C*>(currActor);
-			bool enabling = IsPoliceEspActive(*manager->pConfig) &&
-				manager->pConfig->esp.policeGlowEnabled &&
-				!(filterDormant && guard->Dead_);
-			int guardStencilValue = 0;
-			if (guard->Mesh)
+			if (cachedActor.type == TrackedActorType::Guard)
 			{
-				guard->Mesh->SetRenderCustomDepth(enabling);
-				guardStencilValue = guard->Mesh->CustomDepthStencilValue;
+				auto* guard = static_cast<SDK::ANPC_Guard_C*>(currActor);
+				bool enabling = IsPoliceEspActive(config) &&
+					config.esp.policeGlowEnabled &&
+					!(filterDormant && guard->Dead_);
+				ApplyGlowToPrimitive(guard->Mesh, enabling, kGlowStencilValue);
+				ApplyGlowToPrimitive(guard->Hat, enabling, kGlowStencilValue);
 			}
-			if (guard->Hat)
+			else if (cachedActor.type == TrackedActorType::Police)
 			{
-				guard->Hat->SetRenderCustomDepth(enabling);
-				if (enabling)
-					guard->Hat->SetCustomDepthStencilValue(guardStencilValue);
+				auto* police = static_cast<SDK::ANPC_Police_base_C*>(currActor);
+				bool enabling = IsPoliceEspActive(config) &&
+					config.esp.policeGlowEnabled &&
+					!(filterDormant && police->Dead_);
+				auto* character = static_cast<SDK::ACharacter*>(currActor);
+				ApplyGlowToPrimitive(
+					character ? character->Mesh : nullptr,
+					enabling,
+					kGlowStencilValue);
 			}
-		}
-		else if (cachedActor.type == TrackedActorType::Police)
-		{
-			auto* police = static_cast<SDK::ANPC_Police_base_C*>(currActor);
-			bool enabling = IsPoliceEspActive(*manager->pConfig) &&
-				manager->pConfig->esp.policeGlowEnabled &&
-				!(filterDormant && police->Dead_);
-			auto* character = static_cast<SDK::ACharacter*>(currActor);
-			if (character->Mesh)
-				character->Mesh->SetRenderCustomDepth(enabling);
-		}
-		else if (cachedActor.type == TrackedActorType::Camera)
-		{
-			auto* camera = static_cast<SDK::ACameraBP_C*>(currActor);
-			bool enabling = IsCameraEspActive(*manager->pConfig) &&
-				manager->pConfig->esp.cameraGlowEnabled &&
-				!(filterDormant && camera->Destroyed_);
-			if (camera->CameraHead)
-				camera->CameraHead->SetRenderCustomDepth(enabling);
-			if (camera->CameraArm)
-				camera->CameraArm->SetRenderCustomDepth(enabling);
-		}
-		else if (cachedActor.type == TrackedActorType::Player)
-		{
-			auto* character = static_cast<SDK::ACharacter*>(currActor);
-			bool isLocalPlayer = currActor == Vars::CharacterClass || currActor->GetOwner() == Vars::MyController;
-			bool enabling = IsPlayerEspActive(*manager->pConfig) &&
-				manager->pConfig->esp.playerGlowEnabled &&
-				!isLocalPlayer;
-			if (character->Mesh)
+			else if (cachedActor.type == TrackedActorType::Camera)
 			{
-				character->Mesh->SetRenderCustomDepth(enabling);
-				if (enabling)
-					character->Mesh->SetCustomDepthStencilValue(1);
+				auto* camera = static_cast<SDK::ACameraBP_C*>(currActor);
+				bool enabling = IsCameraEspActive(config) &&
+					config.esp.cameraGlowEnabled &&
+					!(filterDormant && camera->Destroyed_);
+				DisableGlowOnPrimitive(camera->CameraViewCollision);
+				DisableGlowOnPrimitive(camera->CameraHead);
+				DisableGlowOnPrimitive(camera->CameraArm);
+				EnsureCameraProxies(camera, enabling, kGlowStencilValue);
+			}
+			else if (cachedActor.type == TrackedActorType::Player)
+			{
+				auto* character = static_cast<SDK::ACharacter*>(currActor);
+				bool isLocalPlayer = currActor == Vars::CharacterClass || currActor->GetOwner() == Vars::MyController;
+				bool enabling = IsPlayerEspActive(config) &&
+					config.esp.playerGlowEnabled &&
+					!isLocalPlayer;
+				ApplyGlowToPrimitive(
+					character ? character->Mesh : nullptr,
+					enabling,
+					kGlowStencilValue);
+			}
+			else if (cachedActor.type == TrackedActorType::Rat)
+			{
+				auto* rat = static_cast<SDK::ARatCharacter_C*>(currActor);
+				bool enabling = IsRatEspActive(config) &&
+					config.esp.ratGlowEnabled &&
+					!(filterDormant && rat->Dead_);
+				ApplyGlowToPrimitive(
+					rat ? rat->Mesh : nullptr,
+					enabling,
+					kGlowStencilValue);
 			}
 		}
-		else if (cachedActor.type == TrackedActorType::Rat)
+		__except (EXCEPTION_EXECUTE_HANDLER)
 		{
-			auto* rat = static_cast<SDK::ARatCharacter_C*>(currActor);
-			bool enabling = IsRatEspActive(*manager->pConfig) &&
-				manager->pConfig->esp.ratGlowEnabled &&
-				!(filterDormant && rat->Dead_);
-			if (rat->Mesh)
-				rat->Mesh->SetRenderCustomDepth(enabling);
 		}
 	}
 }
 
+void Esp::ApplyGlowColorOverride()
+{
+	if (!Vars::World || Vars::World->Levels.Num() == 0)
+		return;
+
+	SDK::ULevel* currentLevel = Vars::World->Levels[0];
+	if (!currentLevel)
+		return;
+
+	if (glowOverrideLevel && glowOverrideLevel != currentLevel)
+		RestoreGlowColorOverride();
+
+	SDK::FLinearColor primaryGlowColor{};
+	SDK::FLinearColor secondaryGlowColor{};
+	GetGlowColors(*manager->pConfig, primaryGlowColor, secondaryGlowColor);
+
+	const bool colorChanged =
+		!hasLastAppliedGlowColor ||
+		!AreSameColor(lastAppliedGlowColor, primaryGlowColor) ||
+		!AreSameColor(lastAppliedGlowSecondaryColor, secondaryGlowColor);
+	if (colorChanged)
+	{
+		lastAppliedGlowColor = primaryGlowColor;
+		lastAppliedGlowSecondaryColor = secondaryGlowColor;
+		hasLastAppliedGlowColor = true;
+	}
+
+	std::vector<GlowBlendableOverride> activeOverrides{};
+	activeOverrides.reserve(glowBlendableOverrides.size());
+
+	for (const GlowBlendableOverride& overrideEntry : glowBlendableOverrides)
+	{
+		SDK::TArray<SDK::FWeightedBlendable>* blendables = GetBlendablesForOwner(overrideEntry.ownerType, overrideEntry.owner);
+		if (!blendables)
+			continue;
+		if (overrideEntry.index < 0 || overrideEntry.index >= blendables->Num())
+			continue;
+
+		SDK::FWeightedBlendable& blendable = (*blendables)[overrideEntry.index];
+		if (blendable.Object != overrideEntry.overrideObject)
+			continue;
+		if (!overrideEntry.overrideObject)
+			continue;
+
+		if (colorChanged)
+			ApplyGlowColorToMaterial(overrideEntry.overrideObject, primaryGlowColor, secondaryGlowColor);
+		activeOverrides.push_back(overrideEntry);
+	}
+
+	glowBlendableOverrides.swap(activeOverrides);
+	if (!glowBlendableOverrides.empty())
+		return;
+
+	for (int i = 0; i < currentLevel->Actors.Num(); i++)
+	{
+		SDK::AActor* actor = currentLevel->Actors[i];
+		if (!actor || Fns::IsBadPoint(actor))
+			continue;
+		if (!actor->IsA(SDK::APostProcessVolume::StaticClass()))
+			continue;
+
+		auto* postProcessVolume = static_cast<SDK::APostProcessVolume*>(actor);
+		SDK::TArray<SDK::FWeightedBlendable>& blendables = postProcessVolume->Settings.WeightedBlendables.Array;
+		if (blendables.Num() == 0)
+			continue;
+
+		SDK::FWeightedBlendable& blendable = blendables[0];
+		SDK::UObject* blendableObject = blendable.Object;
+		if (!blendableObject || !blendableObject->IsA(SDK::UMaterialInterface::StaticClass()))
+			continue;
+
+		auto* sourceMaterial = static_cast<SDK::UMaterialInterface*>(blendableObject);
+		if (!IsTargetGlowBlendableMaterial(sourceMaterial))
+			continue;
+
+		SDK::UMaterialInstanceDynamic* overrideMaterial = CreateGlowOverrideMaterial(sourceMaterial);
+		if (!overrideMaterial)
+			continue;
+
+		ApplyGlowColorToMaterial(overrideMaterial, primaryGlowColor, secondaryGlowColor);
+		glowBlendableOverrides.push_back({
+			GlowBlendableOwnerType::PostProcessVolume,
+			postProcessVolume,
+			0,
+			blendableObject,
+			overrideMaterial
+			});
+		blendable.Object = overrideMaterial;
+		glowOverrideLevel = currentLevel;
+		return;
+	}
+}
+
+void Esp::RestoreGlowColorOverride()
+{
+	if (glowBlendableOverrides.empty())
+	{
+		glowOverrideLevel = nullptr;
+		hasLastAppliedGlowColor = false;
+		return;
+	}
+
+	__try
+	{
+		for (const GlowBlendableOverride& overrideEntry : glowBlendableOverrides)
+		{
+			SDK::TArray<SDK::FWeightedBlendable>* blendables = GetBlendablesForOwner(overrideEntry.ownerType, overrideEntry.owner);
+			if (!blendables)
+				continue;
+			if (overrideEntry.index < 0 || overrideEntry.index >= blendables->Num())
+				continue;
+
+			SDK::FWeightedBlendable& blendable = (*blendables)[overrideEntry.index];
+			if (blendable.Object == overrideEntry.overrideObject)
+				blendable.Object = overrideEntry.originalObject;
+		}
+	}
+	__except (EXCEPTION_EXECUTE_HANDLER)
+	{
+	}
+
+	glowBlendableOverrides.clear();
+	glowOverrideLevel = nullptr;
+	hasLastAppliedGlowColor = false;
+}
+
 void Esp::DisableAll()
 {
+	RestoreGlowColorOverride();
+
 	if (!Vars::World || Vars::World->Levels.Num() == 0)
 		return;
 
@@ -366,29 +770,27 @@ void Esp::DisableAll()
 		if (fullName.find("NPC_Guard") != std::string::npos)
 		{
 			auto* guard = static_cast<SDK::ANPC_Guard_C*>(currActor);
-			if (guard->Mesh)
-				guard->Mesh->SetRenderCustomDepth(false);
-			if (guard->Hat)
-				guard->Hat->SetRenderCustomDepth(false);
+			DisableGlowOnPrimitive(guard->Mesh);
+			DisableGlowOnPrimitive(guard->Hat);
 		}
 		else if (fullName.find("NPC_Police") != std::string::npos ||
 			fullName.find("PlayerCharacter") != std::string::npos ||
 			fullName.find("RatCharacter") != std::string::npos)
 		{
 			auto* character = static_cast<SDK::ACharacter*>(currActor);
-			if (character->Mesh)
-				character->Mesh->SetRenderCustomDepth(false);
+			DisableGlowOnPrimitive(character->Mesh);
 		}
 
 		if (fullName.find("CameraBP") != std::string::npos)
 		{
 			auto* camera = static_cast<SDK::ACameraBP_C*>(currActor);
-			if (camera->CameraHead)
-				camera->CameraHead->SetRenderCustomDepth(false);
-			if (camera->CameraArm)
-				camera->CameraArm->SetRenderCustomDepth(false);
+			DisableGlowOnPrimitive(camera->CameraViewCollision);
+			DisableGlowOnPrimitive(camera->CameraHead);
+			DisableGlowOnPrimitive(camera->CameraArm);
 		}
 	}
+
+	CleanupAllCameraProxies();
 
 	prevPoliceEsp = false;
 	prevPoliceGlow = false;
@@ -404,4 +806,6 @@ void Esp::DisableAll()
 	actorCacheFrameCounter = 0;
 	liveBulletPositions.clear();
 	bulletTracerSegments.clear();
+	glowOverrideLevel = nullptr;
+	hasLastAppliedGlowColor = false;
 }

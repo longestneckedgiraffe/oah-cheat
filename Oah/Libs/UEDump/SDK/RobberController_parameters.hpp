@@ -11,9 +11,9 @@
 #include "Basic.hpp"
 
 #include "SteamCore_structs.hpp"
+#include "InputSettingStruct_structs.hpp"
 #include "SkillSaveStruct_structs.hpp"
 #include "SkillProgressStruct_structs.hpp"
-#include "InputSettingStruct_structs.hpp"
 #include "Engine_structs.hpp"
 #include "CoreUObject_structs.hpp"
 #include "ShopItemCategory_structs.hpp"

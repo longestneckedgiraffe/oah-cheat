@@ -45,28 +45,42 @@ namespace
 		return ImGui::ColorConvertFloat4ToU32(ImVec4(color[0], color[1], color[2], color[3]));
 	}
 
-	bool IsCameraMeshRecentlyRendered(SDK::ACameraBP_C* camera)
+	bool IsCameraHeadRecentlyRendered(SDK::ACameraBP_C* camera, float tolerance)
+	{
+		return
+			camera &&
+			camera->CameraHead &&
+			SDK::UKismetSystemLibrary::IsValid(camera->CameraHead) &&
+			camera->CameraHead->WasRecentlyRendered(tolerance);
+	}
+
+	bool IsCameraArmRecentlyRendered(SDK::ACameraBP_C* camera, float tolerance)
+	{
+		return
+			camera &&
+			camera->CameraArm &&
+			SDK::UKismetSystemLibrary::IsValid(camera->CameraArm) &&
+			camera->CameraArm->WasRecentlyRendered(tolerance);
+	}
+
+	bool IsCameraActorRecentlyRendered(SDK::ACameraBP_C* camera, float tolerance)
+	{
+		return camera && camera->WasRecentlyRendered(tolerance);
+	}
+
+	bool IsCameraVisibleForBoxes(const Config& config, SDK::ACameraBP_C* camera)
 	{
 		if (!camera)
 			return false;
 
 		static constexpr float kRecentRenderTolerance = 0.06f;
 
-		if (camera->CameraHead &&
-			SDK::UKismetSystemLibrary::IsValid(camera->CameraHead) &&
-			camera->CameraHead->WasRecentlyRendered(kRecentRenderTolerance))
-		{
-			return true;
-		}
+		const bool headRecent = IsCameraHeadRecentlyRendered(camera, kRecentRenderTolerance);
+		const bool armRecent = IsCameraArmRecentlyRendered(camera, kRecentRenderTolerance);
+		if (config.esp.cameraGlowEnabled)
+			return headRecent || armRecent;
 
-		if (camera->CameraArm &&
-			SDK::UKismetSystemLibrary::IsValid(camera->CameraArm) &&
-			camera->CameraArm->WasRecentlyRendered(kRecentRenderTolerance))
-		{
-			return true;
-		}
-
-		return camera->WasRecentlyRendered(kRecentRenderTolerance);
+		return headRecent || armRecent || IsCameraActorRecentlyRendered(camera, kRecentRenderTolerance);
 	}
 
 	ImU32 GetBoxColor(const Config& config, SDK::APlayerController* controller, SDK::AActor* actor, const SDK::FVector& viewPoint)
@@ -76,7 +90,7 @@ namespace
 
 		const bool isVisible =
 			actor->IsA(SDK::ACameraBP_C::StaticName())
-			? IsCameraMeshRecentlyRendered(static_cast<SDK::ACameraBP_C*>(actor))
+			? IsCameraVisibleForBoxes(config, static_cast<SDK::ACameraBP_C*>(actor))
 			: controller->LineOfSightTo(actor, viewPoint, false);
 
 		return isVisible

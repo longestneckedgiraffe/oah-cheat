@@ -12,8 +12,8 @@
 
 #include "CoreUObject_structs.hpp"
 #include "Engine_structs.hpp"
-#include "ShopItemCategory_structs.hpp"
 #include "SkinRotationStructure_structs.hpp"
+#include "ShopItemCategory_structs.hpp"
 #include "UMG_structs.hpp"
 #include "UMG_classes.hpp"
 

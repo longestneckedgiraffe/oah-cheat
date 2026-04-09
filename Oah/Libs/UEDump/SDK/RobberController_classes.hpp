@@ -11,13 +11,13 @@
 #include "Basic.hpp"
 
 #include "SkillProgressStruct_structs.hpp"
+#include "InputSettingStruct_structs.hpp"
+#include "SteamCore_structs.hpp"
+#include "SettingsStruct_structs.hpp"
 #include "Engine_structs.hpp"
 #include "Engine_classes.hpp"
-#include "SettingsStruct_structs.hpp"
-#include "SteamCore_structs.hpp"
-#include "InputSettingStruct_structs.hpp"
-#include "AttachmentArrayStructure_structs.hpp"
 #include "SkillSaveStruct_structs.hpp"
+#include "AttachmentArrayStructure_structs.hpp"
 #include "ShopItemCategory_structs.hpp"
 
 
