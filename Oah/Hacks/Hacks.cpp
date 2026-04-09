@@ -30,6 +30,12 @@ SDK::FVector GetVectorForward(const SDK::FRotator& angles);
 
 namespace
 {
+	bool ShouldRestrictAimbotToVisibleTargets(const Config& config)
+	{
+		return config.esp.visibilityCheckEnabled &&
+			(config.esp.policeBox2DEnabled || config.esp.policeBox3DEnabled);
+	}
+
 	struct WeaponAmmoState
 	{
 		int bulletsLeft{};
@@ -280,6 +286,7 @@ void Hacks::RunHacks()
 	SpeedHack();
 	LevelHack();
 	CashHack();
+	Bhop();
 	FlyHack();
 	Noclip();
 	ThirdPerson();
@@ -316,6 +323,7 @@ void Hacks::Aimbot()
 	SDK::FVector cameraLocation = Vars::MyController->PlayerCameraManager->GetCameraLocation();
 	SDK::FRotator cameraRotation = Vars::MyController->PlayerCameraManager->GetCameraRotation();
 	SDK::FVector cameraForward = GetVectorForward(cameraRotation);
+	const bool visibleOnly = ShouldRestrictAimbotToVisibleTargets(*manager->pConfig);
 	static SDK::FName headBone = SDK::FName();
 	static bool headBoneInitialized = false;
 	if (!headBoneInitialized)
@@ -371,6 +379,9 @@ void Hacks::Aimbot()
 
 		auto* character = static_cast<SDK::ACharacter*>(currActor);
 		if (!character->Mesh)
+			continue;
+
+		if (visibleOnly && !Vars::MyController->LineOfSightTo(currActor, cameraLocation, false))
 			continue;
 
 		SDK::FVector headLocation = character->Mesh->GetSocketLocation(headBone);
@@ -526,6 +537,42 @@ void Hacks::CashHack()
 	Vars::CharacterClass->PCController->Cash = static_cast<UC::int32>(manager->pConfig->cashHack.cashValue);
 	Vars::CharacterClass->PCController->SaveCash();
 	manager->pConfig->cashHack.setCash = false;
+}
+
+void Hacks::Bhop()
+{
+	static bool bhopWasJumping = false;
+
+	if (!Vars::CharacterClass || !Vars::CharacterClass->CharacterMovement)
+		return;
+
+	if (!manager->pConfig->bhop.enabled || !IsKeyHeld(VK_SPACE))
+	{
+		if (bhopWasJumping || Vars::CharacterClass->bPressedJump)
+			Vars::CharacterClass->StopJumping();
+
+		bhopWasJumping = false;
+		return;
+	}
+
+	if (Vars::CharacterClass->Downed_ || Vars::CharacterClass->Vaulting_)
+	{
+		if (bhopWasJumping || Vars::CharacterClass->bPressedJump)
+			Vars::CharacterClass->StopJumping();
+
+		bhopWasJumping = false;
+		return;
+	}
+
+	if (Vars::CharacterClass->CharacterMovement->IsMovingOnGround() && Vars::CharacterClass->CanJump())
+	{
+		Vars::CharacterClass->Jump();
+		bhopWasJumping = true;
+	}
+	else if (bhopWasJumping || Vars::CharacterClass->bPressedJump)
+	{
+		Vars::CharacterClass->StopJumping();
+	}
 }
 
 SDK::FVector GetVectorForward(const SDK::FVector& angles)

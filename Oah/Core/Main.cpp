@@ -111,6 +111,7 @@ DWORD WINAPI MainThread(HMODULE hmodule)
 			manager->pConfig->noclip.enabled = false;
 			manager->pConfig->thirdPerson.enabled = false;
 			manager->pConfig->jumpHack.enabled = false;
+			manager->pConfig->bhop.enabled = false;
 			manager->pConfig->disableCameras.enabled = false;
 			manager->pConfig->invulnerable.enabled = false;
 			manager->pConfig->maxHealth.enabled = false;

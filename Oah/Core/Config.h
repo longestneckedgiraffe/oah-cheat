@@ -29,6 +29,11 @@ public:
 		int keyEnable{ VK_F2 };
 	} jumpHack;
 
+	struct Bhop
+	{
+		bool enabled{ false };
+	} bhop;
+
 	struct FlyHack
 	{
 		bool enabled{ false };

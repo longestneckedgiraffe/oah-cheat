@@ -284,13 +284,17 @@ void Esp::ApplyGlow()
 			bool enabling = IsPoliceEspActive(*manager->pConfig) &&
 				manager->pConfig->esp.policeGlowEnabled &&
 				!(filterDormant && guard->Dead_);
+			int guardStencilValue = 0;
 			if (guard->Mesh)
+			{
 				guard->Mesh->SetRenderCustomDepth(enabling);
+				guardStencilValue = guard->Mesh->CustomDepthStencilValue;
+			}
 			if (guard->Hat)
 			{
 				guard->Hat->SetRenderCustomDepth(enabling);
 				if (enabling)
-					guard->Hat->SetCustomDepthStencilValue(0);
+					guard->Hat->SetCustomDepthStencilValue(guardStencilValue);
 			}
 		}
 		else if (cachedActor.type == TrackedActorType::Police)

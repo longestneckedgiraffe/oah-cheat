@@ -51,6 +51,8 @@ namespace
 			return "F2";
 		case VK_F3:
 			return "F3";
+		case VK_SPACE:
+			return "SPACE";
 		default:
 			return nullptr;
 		}
@@ -221,6 +223,10 @@ void Gui::RenderMainWindow()
 						ImGui::SliderInt("Jump Strength", &manager->pConfig->jumpHack.value, 300, 800);
 						DrawToggleKeybindText("Toggle with ", manager->pConfig->jumpHack.keyEnable);
 					}
+
+					ImGui::Checkbox("Bhop", &manager->pConfig->bhop.enabled);
+					if (manager->pConfig->bhop.enabled)
+						DrawToggleKeybindText("Hold ", VK_SPACE);
 					ImGui::EndChild();
 
 					ImGui::TableNextColumn();

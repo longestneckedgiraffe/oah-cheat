@@ -11,6 +11,7 @@ private:
 	void SpeedHack();
 	void LevelHack();
 	void CashHack();
+	void Bhop();
 	void FlyHack();
 	void Noclip();
 	void ThirdPerson();
