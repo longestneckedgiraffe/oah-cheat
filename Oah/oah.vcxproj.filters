@@ -31,6 +31,9 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="Core\ActorRegistry.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
     <ClCompile Include="Core\Config.cpp">
       <Filter>src</Filter>
     </ClCompile>
@@ -1115,6 +1118,9 @@
     </ResourceCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Core\ActorRegistry.h">
+      <Filter>src</Filter>
+    </ClInclude>
     <ClInclude Include="Core\Config.h">
       <Filter>src</Filter>
     </ClInclude>

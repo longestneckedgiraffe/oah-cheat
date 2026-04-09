@@ -17,7 +17,7 @@ namespace
 {
 	bool IsBulletTraceActor(SDK::AActor* actor)
 	{
-		return actor && actor->IsA(SDK::ABulletTrace_C::StaticName());
+		return actor && actor->IsA(SDK::ABulletTrace_C::StaticClass());
 	}
 
 	bool IsPoliceEspActive(const Config& config)
@@ -324,11 +324,13 @@ void Esp::UpdateBulletTracers()
 			}),
 		bulletTracerSegments.end());
 
+	std::unordered_set<std::uintptr_t> activeBullets;
+	activeBullets.reserve(liveBulletPositions.size() + 16);
+
 	SDK::ULevel* currLevel = Vars::World->Levels[0];
 	if (!currLevel)
 		return;
 
-	std::unordered_set<std::uintptr_t> activeBullets;
 	for (int j = 0; j < currLevel->Actors.Num(); j++)
 	{
 		SDK::AActor* currActor = currLevel->Actors[j];
@@ -520,11 +522,6 @@ void Esp::RenderEntityBoxes()
 		if (draw3D && hasProjectedBounds)
 			Draw3DBox(screenCorners, drawList, boxColor);
 	}
-}
-
-void Esp::RenderDebugESP()
-{
-	return;
 }
 
 void Esp::RenderFovCircle()

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <unordered_map>
 #include <vector>
 
@@ -12,7 +13,6 @@ public:
 	void Tick();
 	void RenderOverlay();
 	bool NeedsOverlayRender() const;
-	void RenderESP();
 	void DisableAll();
 
 	enum class TrackedActorType
@@ -68,7 +68,6 @@ private:
 	void RenderEntityBoxes();
 
 	void RenderFovCircle();
-	void RenderDebugESP();
 
 	SDK::UStaticMeshComponent* CreateCameraProxyMesh(SDK::ACameraBP_C* camera, SDK::UStaticMeshComponent* source, int stencilValue);
 	void EnsureCameraProxies(SDK::ACameraBP_C* camera, bool enabling, int stencilValue);
@@ -84,8 +83,7 @@ private:
 	bool prevRatGlow{ false };
 	bool prevFilterDormant{ true };
 	int espFrameCounter{ 0 };
-	int actorCacheFrameCounter{ 0 };
-	SDK::ULevel* cachedEspLevel{ nullptr };
+	std::uint64_t cachedActorRegistryRevision{ 0 };
 	std::vector<CachedEspActor> cachedEspActors{};
 	std::unordered_map<std::uintptr_t, SDK::FVector> liveBulletPositions{};
 	std::vector<BulletTracerSegment> bulletTracerSegments{};

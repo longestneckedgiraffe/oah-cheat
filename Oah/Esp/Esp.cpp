@@ -14,29 +14,13 @@ namespace
 {
 	static constexpr int kGlowStencilValue = 0;
 
-	bool IsGuardActor(SDK::AActor* actor)
+	void AppendTrackedActors(
+		std::vector<Esp::CachedEspActor>& destination,
+		const std::vector<SDK::AActor*>& actors,
+		Esp::TrackedActorType type)
 	{
-		return actor && actor->IsA(SDK::ANPC_Guard_C::StaticName());
-	}
-
-	bool IsPoliceActor(SDK::AActor* actor)
-	{
-		return actor && actor->IsA(SDK::ANPC_Police_base_C::StaticName());
-	}
-
-	bool IsPlayerActor(SDK::AActor* actor)
-	{
-		return actor && actor->IsA(SDK::APlayerCharacter_C::StaticName());
-	}
-
-	bool IsCameraActor(SDK::AActor* actor)
-	{
-		return actor && actor->IsA(SDK::ACameraBP_C::StaticName());
-	}
-
-	bool IsRatActor(SDK::AActor* actor)
-	{
-		return actor && actor->IsA(SDK::ARatCharacter_C::StaticName());
+		for (SDK::AActor* actor : actors)
+			destination.push_back({ actor, type });
 	}
 
 	bool IsPoliceEspActive(const Config& config)
@@ -345,74 +329,42 @@ void Esp::RefreshEspActorCache(bool forceRefresh, bool trackPolice, bool trackPl
 	{
 		CleanupAllCameraProxies();
 		cachedEspActors.clear();
-		cachedEspLevel = nullptr;
-		actorCacheFrameCounter = 0;
+		cachedActorRegistryRevision = 0;
 		return;
 	}
 
-	if (!Vars::World || Vars::World->Levels.Num() == 0)
-	{
-		CleanupAllCameraProxies();
-		cachedEspActors.clear();
-		cachedEspLevel = nullptr;
-		actorCacheFrameCounter = 0;
-		return;
-	}
-
-	SDK::ULevel* currLevel = Vars::World->Levels[0];
-	if (!currLevel)
-	{
-		CleanupAllCameraProxies();
-		cachedEspActors.clear();
-		cachedEspLevel = nullptr;
-		actorCacheFrameCounter = 0;
-		return;
-	}
-
-	actorCacheFrameCounter++;
-	const bool levelChanged = cachedEspLevel != currLevel;
-	const bool refreshNow = forceRefresh || levelChanged || actorCacheFrameCounter >= 120;
-
-	if (!refreshNow)
+	if (!manager)
 		return;
 
-	if (levelChanged)
+	if (!trackCameras)
 		CleanupAllCameraProxies();
+
+	const ActorRegistry& actorRegistry = manager->actorRegistry;
+	const std::uint64_t registryRevision = actorRegistry.GetRevision();
+	if (!forceRefresh && cachedActorRegistryRevision == registryRevision)
+		return;
 
 	cachedEspActors.clear();
-	cachedEspActors.reserve(256);
-	cachedEspLevel = currLevel;
-	actorCacheFrameCounter = 0;
+	const size_t reserveCount =
+		(trackPolice ? actorRegistry.GetGuards().size() + actorRegistry.GetPolice().size() : 0) +
+		(trackPlayers ? actorRegistry.GetPlayers().size() : 0) +
+		(trackCameras ? actorRegistry.GetCameras().size() : 0) +
+		(trackRats ? actorRegistry.GetRats().size() : 0);
+	cachedEspActors.reserve(reserveCount);
 
-	for (int j = 0; j < currLevel->Actors.Num(); j++)
+	if (trackPolice)
 	{
-		SDK::AActor* currActor = currLevel->Actors[j];
-		if (!currActor || !currActor->RootComponent)
-			continue;
-		if (Fns::IsBadPoint(currActor))
-			continue;
-
-		if (trackPolice && IsGuardActor(currActor))
-		{
-			cachedEspActors.push_back({ currActor, TrackedActorType::Guard });
-		}
-		else if (trackPolice && IsPoliceActor(currActor))
-		{
-			cachedEspActors.push_back({ currActor, TrackedActorType::Police });
-		}
-		else if (trackPlayers && IsPlayerActor(currActor))
-		{
-			cachedEspActors.push_back({ currActor, TrackedActorType::Player });
-		}
-		else if (trackCameras && IsCameraActor(currActor))
-		{
-			cachedEspActors.push_back({ currActor, TrackedActorType::Camera });
-		}
-		else if (trackRats && IsRatActor(currActor))
-		{
-			cachedEspActors.push_back({ currActor, TrackedActorType::Rat });
-		}
+		AppendTrackedActors(cachedEspActors, actorRegistry.GetGuards(), TrackedActorType::Guard);
+		AppendTrackedActors(cachedEspActors, actorRegistry.GetPolice(), TrackedActorType::Police);
 	}
+	if (trackPlayers)
+		AppendTrackedActors(cachedEspActors, actorRegistry.GetPlayers(), TrackedActorType::Player);
+	if (trackCameras)
+		AppendTrackedActors(cachedEspActors, actorRegistry.GetCameras(), TrackedActorType::Camera);
+	if (trackRats)
+		AppendTrackedActors(cachedEspActors, actorRegistry.GetRats(), TrackedActorType::Rat);
+
+	cachedActorRegistryRevision = registryRevision;
 }
 
 bool Esp::NeedsOverlayRender() const
@@ -480,7 +432,11 @@ void Esp::Tick()
 	UpdateBulletTracers();
 
 	if (anyTrackedVisuals)
+	{
+		if (stateChanged || cachedActorRegistryRevision == 0)
+			manager->actorRegistry.Refresh(true);
 		RefreshEspActorCache(stateChanged, trackPolice, trackPlayers, trackCameras, trackRats);
+	}
 	else
 		RefreshEspActorCache(false, false, false, false, false);
 
@@ -527,13 +483,6 @@ void Esp::RenderOverlay()
 	RenderFovCircle();
 	RenderBulletTracers();
 	RenderEntityBoxes();
-}
-
-void Esp::RenderESP()
-{
-	Tick();
-	if (NeedsOverlayRender())
-		RenderOverlay();
 }
 
 void Esp::ApplyGlow()
@@ -749,45 +698,41 @@ void Esp::RestoreGlowColorOverride()
 void Esp::DisableAll()
 {
 	RestoreGlowColorOverride();
-
-	if (!Vars::World || Vars::World->Levels.Num() == 0)
-		return;
-
-	SDK::ULevel* currLevel = Vars::World->Levels[0];
-	if (!currLevel)
-		return;
-
-	for (int j = 0; j < currLevel->Actors.Num(); j++)
+	auto disableCharacterMeshes = [](const std::vector<SDK::AActor*>& actors)
 	{
-		SDK::AActor* currActor = currLevel->Actors[j];
-		if (!currActor || !currActor->RootComponent)
+		for (SDK::AActor* actor : actors)
+		{
+			if (!actor || !actor->RootComponent || Fns::IsBadPoint(actor))
+				continue;
+
+			auto* character = static_cast<SDK::ACharacter*>(actor);
+			DisableGlowOnPrimitive(character ? character->Mesh : nullptr);
+		}
+	};
+
+	for (SDK::AActor* actor : manager->actorRegistry.GetGuards())
+	{
+		if (!actor || !actor->RootComponent || Fns::IsBadPoint(actor))
 			continue;
-		if (Fns::IsBadPoint(currActor))
+
+		auto* guard = static_cast<SDK::ANPC_Guard_C*>(actor);
+		DisableGlowOnPrimitive(guard->Mesh);
+		DisableGlowOnPrimitive(guard->Hat);
+	}
+
+	disableCharacterMeshes(manager->actorRegistry.GetPolice());
+	disableCharacterMeshes(manager->actorRegistry.GetPlayers());
+	disableCharacterMeshes(manager->actorRegistry.GetRats());
+
+	for (SDK::AActor* actor : manager->actorRegistry.GetCameras())
+	{
+		if (!actor || !actor->RootComponent || Fns::IsBadPoint(actor))
 			continue;
 
-		std::string fullName = currActor->GetFullName();
-
-		if (fullName.find("NPC_Guard") != std::string::npos)
-		{
-			auto* guard = static_cast<SDK::ANPC_Guard_C*>(currActor);
-			DisableGlowOnPrimitive(guard->Mesh);
-			DisableGlowOnPrimitive(guard->Hat);
-		}
-		else if (fullName.find("NPC_Police") != std::string::npos ||
-			fullName.find("PlayerCharacter") != std::string::npos ||
-			fullName.find("RatCharacter") != std::string::npos)
-		{
-			auto* character = static_cast<SDK::ACharacter*>(currActor);
-			DisableGlowOnPrimitive(character->Mesh);
-		}
-
-		if (fullName.find("CameraBP") != std::string::npos)
-		{
-			auto* camera = static_cast<SDK::ACameraBP_C*>(currActor);
-			DisableGlowOnPrimitive(camera->CameraViewCollision);
-			DisableGlowOnPrimitive(camera->CameraHead);
-			DisableGlowOnPrimitive(camera->CameraArm);
-		}
+		auto* camera = static_cast<SDK::ACameraBP_C*>(actor);
+		DisableGlowOnPrimitive(camera->CameraViewCollision);
+		DisableGlowOnPrimitive(camera->CameraHead);
+		DisableGlowOnPrimitive(camera->CameraArm);
 	}
 
 	CleanupAllCameraProxies();
@@ -802,8 +747,7 @@ void Esp::DisableAll()
 	prevRatGlow = false;
 	prevFilterDormant = true;
 	cachedEspActors.clear();
-	cachedEspLevel = nullptr;
-	actorCacheFrameCounter = 0;
+	cachedActorRegistryRevision = 0;
 	liveBulletPositions.clear();
 	bulletTracerSegments.clear();
 	glowOverrideLevel = nullptr;

@@ -155,6 +155,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="Core\ActorRegistry.cpp" />
     <ClCompile Include="Core\Config.cpp" />
     <ClCompile Include="Core\Main.cpp" />
     <ClCompile Include="Core\Manager.cpp" />
@@ -524,6 +525,7 @@
     <ResourceCompile Include="Libs\MinHook\dll_resources\MinHook.rc" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Core\ActorRegistry.h" />
     <ClInclude Include="Core\Config.h" />
     <ClInclude Include="Core\Manager.h" />
     <ClInclude Include="Core\RenderHook.h" />

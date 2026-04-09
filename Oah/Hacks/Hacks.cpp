@@ -1,3 +1,4 @@
+#include <unordered_map>
 #include <vector>
 
 #include "../Core/Manager.h"
@@ -32,8 +33,21 @@ namespace
 {
 	bool ShouldRestrictAimbotToVisibleTargets(const Config& config)
 	{
-		return config.esp.visibilityCheckEnabled &&
-			(config.esp.policeBox2DEnabled || config.esp.policeBox3DEnabled);
+		return config.esp.visibilityCheckEnabled;
+	}
+
+	template <typename TFunc>
+	void ForEachValidActor(const std::vector<SDK::AActor*>& actors, TFunc&& func)
+	{
+		for (SDK::AActor* actor : actors)
+		{
+			if (!actor || !actor->RootComponent)
+				continue;
+			if (Fns::IsBadPoint(actor))
+				continue;
+
+			func(actor);
+		}
 	}
 
 	struct WeaponAmmoState
@@ -58,7 +72,7 @@ namespace
 		bool initialized{ false };
 	};
 
-	static std::vector<TrackedWeaponAmmoState> g_trackedAmmoWeapons;
+	static std::unordered_map<std::uintptr_t, TrackedWeaponAmmoState> g_trackedAmmoWeapons;
 	static ThirdPersonState g_thirdPersonState;
 
 	void RestoreThirdPersonState()
@@ -155,17 +169,15 @@ namespace
 		if (!weapon)
 			return;
 
-		for (const TrackedWeaponAmmoState& trackedWeapon : g_trackedAmmoWeapons)
-		{
-			if (trackedWeapon.weapon == weapon)
-				return;
-		}
+		const std::uintptr_t weaponKey = reinterpret_cast<std::uintptr_t>(weapon);
+		if (g_trackedAmmoWeapons.contains(weaponKey))
+			return;
 
 		WeaponAmmoState state{};
 		if (!TryReadWeaponAmmoState(weapon, state))
 			return;
 
-		g_trackedAmmoWeapons.push_back({ weapon, state });
+		g_trackedAmmoWeapons.emplace(weaponKey, TrackedWeaponAmmoState{ weapon, state });
 	}
 
 	bool TryCompleteActiveLockpick(SDK::ALock_C* lock)
@@ -194,26 +206,6 @@ namespace
 		}
 	}
 
-	bool IsMoneyActor(SDK::AActor* actor)
-	{
-		return actor && actor->IsA(SDK::AMoney_base_C::StaticName());
-	}
-
-	bool IsCarValueOverlapperActor(SDK::AActor* actor)
-	{
-		return actor && actor->IsA(SDK::ABP_CarValueOverlapper_C::StaticName());
-	}
-
-	bool IsDuffelbagActor(SDK::AActor* actor)
-	{
-		return actor && actor->IsA(SDK::ADuffelbag_C::StaticName());
-	}
-
-	bool IsRobberTruckActor(SDK::AActor* actor)
-	{
-		return actor && actor->IsA(SDK::ARobberTruck_C::StaticName());
-	}
-
 	bool IsPickupHeld(SDK::APickupItem_base_C* pickup)
 	{
 		return pickup &&
@@ -221,25 +213,15 @@ namespace
 			pickup->PickupItemComponent->Picked_up_;
 	}
 
-	SDK::ARobberTruck_C* FindRobberTruck(SDK::ULevel* currLevel)
+	SDK::ARobberTruck_C* FindRobberTruck(const ActorRegistry& actorRegistry)
 	{
-		if (!currLevel)
-			return nullptr;
-
-		for (int j = 0; j < currLevel->Actors.Num(); j++)
+		SDK::ARobberTruck_C* truck = nullptr;
+		ForEachValidActor(actorRegistry.GetRobberTrucks(), [&](SDK::AActor* actor)
 		{
-			SDK::AActor* currActor = currLevel->Actors[j];
-			if (!currActor || !currActor->RootComponent)
-				continue;
-			if (Fns::IsBadPoint(currActor))
-				continue;
-			if (!IsRobberTruckActor(currActor))
-				continue;
-
-			return static_cast<SDK::ARobberTruck_C*>(currActor);
-		}
-
-		return nullptr;
+			if (!truck)
+				truck = static_cast<SDK::ARobberTruck_C*>(actor);
+		});
+		return truck;
 	}
 
 	SDK::FVector GetTruckMoneyDropLocation(SDK::ARobberTruck_C* truck, int index)
@@ -313,17 +295,13 @@ void Hacks::Aimbot()
 		return;
 	if (!Vars::MyController->PlayerCameraManager)
 		return;
-	if (Vars::World->Levels.Num() == 0)
-		return;
-
-	SDK::ULevel* currLevel = Vars::World->Levels[0];
-	if (!currLevel)
-		return;
 
 	SDK::FVector cameraLocation = Vars::MyController->PlayerCameraManager->GetCameraLocation();
 	SDK::FRotator cameraRotation = Vars::MyController->PlayerCameraManager->GetCameraRotation();
 	SDK::FVector cameraForward = GetVectorForward(cameraRotation);
 	const bool visibleOnly = ShouldRestrictAimbotToVisibleTargets(*manager->pConfig);
+	if (manager->actorRegistry.GetGuards().empty() && manager->actorRegistry.GetPolice().empty())
+		manager->actorRegistry.Refresh(true);
 	static SDK::FName headBone = SDK::FName();
 	static bool headBoneInitialized = false;
 	if (!headBoneInitialized)
@@ -335,78 +313,48 @@ void Hacks::Aimbot()
 	SDK::AActor* bestTarget = nullptr;
 	float bestAngle = manager->pConfig->aimbot.fov;
 	SDK::FVector bestHeadLocation{};
-	static std::vector<SDK::AActor*> cachedTargets;
-	static SDK::ULevel* cachedLevel = nullptr;
-	static int targetCacheFrames = 0;
-
-	targetCacheFrames++;
-	if (cachedLevel != currLevel || targetCacheFrames >= 30)
+	auto evaluateTargets = [&](const std::vector<SDK::AActor*>& actors)
 	{
-		cachedTargets.clear();
-		cachedTargets.reserve(128);
-		cachedLevel = currLevel;
-		targetCacheFrames = 0;
-
-		for (int j = 0; j < currLevel->Actors.Num(); j++)
+		ForEachValidActor(actors, [&](SDK::AActor* currActor)
 		{
-			SDK::AActor* currActor = currLevel->Actors[j];
-			if (!currActor || !currActor->RootComponent)
-				continue;
-			if (Fns::IsBadPoint(currActor))
-				continue;
-			if (!currActor->IsA(SDK::ANPC_Guard_C::StaticClass()) &&
-				!currActor->IsA(SDK::ANPC_Police_base_C::StaticClass()))
-				continue;
+			auto* npc = static_cast<SDK::ANPCBase_C*>(currActor);
+			if (manager->pConfig->settings.filterDormant && npc->Dead_)
+				return;
 
-			cachedTargets.push_back(currActor);
-		}
-	}
+			auto* character = static_cast<SDK::ACharacter*>(currActor);
+			if (!character->Mesh)
+				return;
 
-	for (SDK::AActor* currActor : cachedTargets)
-	{
-		if (!currActor || !currActor->RootComponent)
-			continue;
-		if (Fns::IsBadPoint(currActor))
-			continue;
+			if (visibleOnly && !Vars::MyController->LineOfSightTo(currActor, cameraLocation, false))
+				return;
 
-		auto* npc = static_cast<SDK::ANPCBase_C*>(currActor);
-		if (manager->pConfig->settings.filterDormant && npc->Dead_)
-			continue;
+			SDK::FVector headLocation = character->Mesh->GetSocketLocation(headBone);
+			headLocation.Z += 10.f;
 
-		const auto location = currActor->K2_GetActorLocation();
-		if (location.X == 0.f || location.Y == 0.f || location.Z == 0.f)
-			continue;
+			SDK::FVector direction = headLocation - cameraLocation;
+			float dist = sqrtf(direction.X * direction.X + direction.Y * direction.Y + direction.Z * direction.Z);
+			if (dist == 0.f)
+				return;
 
-		auto* character = static_cast<SDK::ACharacter*>(currActor);
-		if (!character->Mesh)
-			continue;
+			SDK::FVector dirNorm = { direction.X / dist, direction.Y / dist, direction.Z / dist };
+			float dot = cameraForward.X * dirNorm.X + cameraForward.Y * dirNorm.Y + cameraForward.Z * dirNorm.Z;
 
-		if (visibleOnly && !Vars::MyController->LineOfSightTo(currActor, cameraLocation, false))
-			continue;
+			if (dot > 1.f) dot = 1.f;
+			if (dot < -1.f) dot = -1.f;
 
-		SDK::FVector headLocation = character->Mesh->GetSocketLocation(headBone);
-		headLocation.Z += 10.f;
+			float angle = acosf(dot) * (180.0f / 3.14159265f);
 
-		SDK::FVector direction = headLocation - cameraLocation;
-		float dist = sqrtf(direction.X * direction.X + direction.Y * direction.Y + direction.Z * direction.Z);
-		if (dist == 0.f)
-			continue;
+			if (angle < bestAngle)
+			{
+				bestAngle = angle;
+				bestTarget = currActor;
+				bestHeadLocation = headLocation;
+			}
+		});
+	};
 
-		SDK::FVector dirNorm = { direction.X / dist, direction.Y / dist, direction.Z / dist };
-		float dot = cameraForward.X * dirNorm.X + cameraForward.Y * dirNorm.Y + cameraForward.Z * dirNorm.Z;
-
-		if (dot > 1.f) dot = 1.f;
-		if (dot < -1.f) dot = -1.f;
-
-		float angle = acosf(dot) * (180.0f / 3.14159265f);
-
-		if (angle < bestAngle)
-		{
-			bestAngle = angle;
-			bestTarget = currActor;
-			bestHeadLocation = headLocation;
-		}
-	}
+	evaluateTargets(manager->actorRegistry.GetGuards());
+	evaluateTargets(manager->actorRegistry.GetPolice());
 
 	if (!bestTarget)
 		return;
@@ -434,26 +382,11 @@ void Hacks::DisableCameras()
 	{
 		if (cameraState)
 		{
-			if (Vars::World && Vars::World->Levels.Num() > 0)
+			ForEachValidActor(manager->actorRegistry.GetCameras(), [](SDK::AActor* actor)
 			{
-				SDK::ULevel* currLevel = Vars::World->Levels[0];
-				if (currLevel)
-				{
-					for (int j = 0; j < currLevel->Actors.Num(); j++)
-					{
-						SDK::AActor* currActor = currLevel->Actors[j];
-						if (!currActor || !currActor->RootComponent)
-							continue;
-						if (Fns::IsBadPoint(currActor))
-							continue;
-						if (currActor->GetFullName().find("CameraBP") != std::string::npos)
-						{
-							auto* camera = static_cast<SDK::ACameraBP_C*>(currActor);
-							camera->Ignored_ = false;
-						}
-					}
-				}
-			}
+				auto* camera = static_cast<SDK::ACameraBP_C*>(actor);
+				camera->Ignored_ = false;
+			});
 			cameraState = false;
 			cameraFrameCounter = 0;
 		}
@@ -465,33 +398,19 @@ void Hacks::DisableCameras()
 		return;
 	cameraFrameCounter = 0;
 	cameraState = true;
+	manager->actorRegistry.Refresh(true);
 
-	if (!Vars::World || Vars::World->Levels.Num() == 0)
-		return;
-
-	SDK::ULevel* currLevel = Vars::World->Levels[0];
-	if (!currLevel)
-		return;
-
-	for (int j = 0; j < currLevel->Actors.Num(); j++)
+	ForEachValidActor(manager->actorRegistry.GetCameras(), [](SDK::AActor* actor)
 	{
-		SDK::AActor* currActor = currLevel->Actors[j];
-		if (!currActor || !currActor->RootComponent)
-			continue;
-		if (Fns::IsBadPoint(currActor))
-			continue;
-		if (currActor->GetFullName().find("CameraBP") != std::string::npos)
-		{
-			auto* camera = static_cast<SDK::ACameraBP_C*>(currActor);
-			camera->Ignored_ = true;
+		auto* camera = static_cast<SDK::ACameraBP_C*>(actor);
+		camera->Ignored_ = true;
 
-			if (camera->SpotPlayerComponent)
-			{
-				camera->SpotPlayerComponent->SpottedPlayer = nullptr;
-				camera->SpotPlayerComponent->Spot_time = 0.f;
-			}
+		if (camera->SpotPlayerComponent)
+		{
+			camera->SpotPlayerComponent->SpottedPlayer = nullptr;
+			camera->SpotPlayerComponent->Spot_time = 0.f;
 		}
-	}
+	});
 }
 
 void Hacks::SpeedHack()
@@ -517,8 +436,6 @@ void Hacks::LevelHack()
 		return;
 	if (!Vars::CharacterClass->PCController)
 		return;
-	if (!Vars::CharacterClass->PCController->Level)
-		return;
 
 	Vars::CharacterClass->PCController->Level = static_cast<UC::int32>(manager->pConfig->levelHack.level);
 	Vars::CharacterClass->PCController->SaveLevel();
@@ -530,8 +447,6 @@ void Hacks::CashHack()
 	if (!manager->pConfig->cashHack.setCash)
 		return;
 	if (!Vars::CharacterClass->PCController)
-		return;
-	if (!Vars::CharacterClass->PCController->Cash)
 		return;
 
 	Vars::CharacterClass->PCController->Cash = static_cast<UC::int32>(manager->pConfig->cashHack.cashValue);
@@ -757,9 +672,9 @@ void Hacks::UnlimitedAmmo()
 	{
 		if (ammoState)
 		{
-			for (const TrackedWeaponAmmoState& trackedWeapon : g_trackedAmmoWeapons)
+			for (const auto& trackedWeaponEntry : g_trackedAmmoWeapons)
 			{
-				TryRestoreWeaponAmmoState(trackedWeapon);
+				TryRestoreWeaponAmmoState(trackedWeaponEntry.second);
 			}
 
 			g_trackedAmmoWeapons.clear();
@@ -836,6 +751,7 @@ void Hacks::InstantLockpick()
 		return;
 	if (!Vars::World || Vars::World->Levels.Num() == 0)
 		return;
+	manager->actorRegistry.Refresh(true);
 
 	__try
 	{
@@ -851,23 +767,12 @@ void Hacks::InstantLockpick()
 	{
 	}
 
-	SDK::ULevel* currLevel = Vars::World->Levels[0];
-	if (!currLevel)
-		return;
-
-	for (int j = 0; j < currLevel->Actors.Num(); j++)
+	bool completed = false;
+	ForEachValidActor(manager->actorRegistry.GetLocks(), [&](SDK::AActor* actor)
 	{
-		SDK::AActor* currActor = currLevel->Actors[j];
-		if (!currActor || !currActor->RootComponent)
-			continue;
-		if (Fns::IsBadPoint(currActor))
-			continue;
-		if (!currActor->IsA(SDK::ALock_C::StaticClass()))
-			continue;
-
-		if (TryCompleteActiveLockpick(static_cast<SDK::ALock_C*>(currActor)))
-			return;
-	}
+		if (!completed)
+			completed = TryCompleteActiveLockpick(static_cast<SDK::ALock_C*>(actor));
+	});
 }
 
 void Hacks::UnlockDoors()
@@ -876,25 +781,13 @@ void Hacks::UnlockDoors()
 		return;
 	if (!Vars::World || Vars::World->Levels.Num() == 0)
 		return;
-
-	SDK::ULevel* currLevel = Vars::World->Levels[0];
-	if (!currLevel)
-		return;
-
-	for (int j = 0; j < currLevel->Actors.Num(); j++)
+	manager->actorRegistry.Refresh(true);
+	ForEachValidActor(manager->actorRegistry.GetDoors(), [](SDK::AActor* actor)
 	{
-		SDK::AActor* currActor = currLevel->Actors[j];
-		if (!currActor || !currActor->RootComponent)
-			continue;
-		if (Fns::IsBadPoint(currActor))
-			continue;
-		if (currActor->GetFullName().find("DoorBP") != std::string::npos)
-		{
-			auto* door = static_cast<SDK::ADoorBP_C*>(currActor);
-			door->Locked_ = false;
-			door->PowerLocked_ = false;
-		}
-	}
+		auto* door = static_cast<SDK::ADoorBP_C*>(actor);
+		door->Locked_ = false;
+		door->PowerLocked_ = false;
+	});
 
 	manager->pConfig->unlockDoors.enabled = false;
 }
@@ -905,25 +798,13 @@ void Hacks::DisableAlarms()
 		return;
 	if (!Vars::World || Vars::World->Levels.Num() == 0)
 		return;
-
-	SDK::ULevel* currLevel = Vars::World->Levels[0];
-	if (!currLevel)
-		return;
-
-	for (int j = 0; j < currLevel->Actors.Num(); j++)
+	manager->actorRegistry.Refresh(true);
+	ForEachValidActor(manager->actorRegistry.GetAlarms(), [](SDK::AActor* actor)
 	{
-		SDK::AActor* currActor = currLevel->Actors[j];
-		if (!currActor || !currActor->RootComponent)
-			continue;
-		if (Fns::IsBadPoint(currActor))
-			continue;
-		if (currActor->GetFullName().find("AlarmBP") != std::string::npos)
-		{
-			auto* alarm = static_cast<SDK::AAlarmBP_C*>(currActor);
-			alarm->AlarmEnabled_ = false;
-			alarm->HasAlarmTriggered_ = false;
-		}
-	}
+		auto* alarm = static_cast<SDK::AAlarmBP_C*>(actor);
+		alarm->AlarmEnabled_ = false;
+		alarm->HasAlarmTriggered_ = false;
+	});
 
 	manager->pConfig->disableAlarms.enabled = false;
 }
@@ -935,72 +816,58 @@ void Hacks::TeleportExploits()
 		!manager->pConfig->teleportExploits.killCameras &&
 		!manager->pConfig->teleportExploits.moveMoneyToTruck)
 		return;
-	if (!Vars::MyController)
-		return;
-	if (!Vars::MyController->PlayerCameraManager)
-		return;
-	if (Vars::World->Levels.Num() == 0)
-		return;
-
-	SDK::ULevel* currLevel = Vars::World->Levels[0];
-	if (!currLevel)
-		return;
+	manager->actorRegistry.Refresh(true);
 
 	SDK::ARobberTruck_C* truck = nullptr;
 	if (manager->pConfig->teleportExploits.moveMoneyToTruck)
-		truck = FindRobberTruck(currLevel);
+		truck = FindRobberTruck(manager->actorRegistry);
 
 	int truckMoneyIndex = 0;
-	for (int j = 0; j < currLevel->Actors.Num(); j++)
+	if (manager->pConfig->teleportExploits.moveMoneyToTruck && truck)
 	{
-		SDK::AActor* currActor = currLevel->Actors[j];
-
-		if (!currActor)
-			continue;
-		if (!currActor->RootComponent)
-			continue;
-		if (Fns::IsBadPoint(currActor))
-			continue;
-
-		const auto location = currActor->K2_GetActorLocation();
-		if (location.X == 0.f || location.Y == 0.f || location.Z == 0.f)
-			continue;
-
-		SDK::FVector teleLocation = { -9999.f, 9999.f, 9999.f };
-		std::string fullName = currActor->GetFullName();
-		if (manager->pConfig->teleportExploits.moveMoneyToTruck && truck)
+		ForEachValidActor(manager->actorRegistry.GetMoney(), [&](SDK::AActor* actor)
 		{
-			if (IsMoneyActor(currActor) && !IsCarValueOverlapperActor(currActor))
+			auto* money = static_cast<SDK::AMoney_base_C*>(actor);
+			if (money->Value > 0 && !IsPickupHeld(money))
 			{
-				auto* money = static_cast<SDK::AMoney_base_C*>(currActor);
-				if (money->Value > 0 && !IsPickupHeld(money))
-				{
-					currActor->K2_TeleportTo(GetTruckMoneyDropLocation(truck, truckMoneyIndex++), currActor->K2_GetActorRotation());
-					continue;
-				}
+				actor->K2_TeleportTo(GetTruckMoneyDropLocation(truck, truckMoneyIndex++), actor->K2_GetActorRotation());
 			}
-			else if (IsDuffelbagActor(currActor))
-			{
-				auto* duffelbag = static_cast<SDK::ADuffelbag_C*>(currActor);
-				if (duffelbag->AttachedActors.Num() > 0 && !IsPickupHeld(duffelbag))
-				{
-					currActor->K2_TeleportTo(GetTruckMoneyDropLocation(truck, truckMoneyIndex++), currActor->K2_GetActorRotation());
-					continue;
-				}
-			}
-		}
+		});
 
-		if (manager->pConfig->teleportExploits.killCivilians && fullName.find("Civilian_NPC") != std::string::npos)
-			currActor->K2_TeleportTo(teleLocation, SDK::FRotator{ 0, 0, 0 });
-		else if (manager->pConfig->teleportExploits.killRats && fullName.find("RatCharacter") != std::string::npos)
-			currActor->K2_TeleportTo(teleLocation, SDK::FRotator{ 0, 0, 0 });
-		else if (manager->pConfig->teleportExploits.killPolice && (fullName.find("NPC_Police") != std::string::npos || fullName.find("NPC_Guard") != std::string::npos))
-			currActor->K2_TeleportTo(teleLocation, SDK::FRotator{ 0, 0, 0 });
-		else if (manager->pConfig->teleportExploits.killDoors && fullName.find("DoorBP") != std::string::npos)
-			currActor->K2_TeleportTo(teleLocation, SDK::FRotator{ 0, 0, 0 });
-		else if (manager->pConfig->teleportExploits.killCameras && fullName.find("CameraBP") != std::string::npos)
-			currActor->K2_TeleportTo(teleLocation, SDK::FRotator{ 0, 0, 0 });
+		ForEachValidActor(manager->actorRegistry.GetDuffelbags(), [&](SDK::AActor* actor)
+		{
+			auto* duffelbag = static_cast<SDK::ADuffelbag_C*>(actor);
+			if (duffelbag->AttachedActors.Num() > 0 && !IsPickupHeld(duffelbag))
+			{
+				actor->K2_TeleportTo(GetTruckMoneyDropLocation(truck, truckMoneyIndex++), actor->K2_GetActorRotation());
+			}
+		});
 	}
+
+	const SDK::FVector teleLocation = { -9999.f, 9999.f, 9999.f };
+	const SDK::FRotator teleRotation{ 0.0f, 0.0f, 0.0f };
+
+	auto teleportActors = [&](const std::vector<SDK::AActor*>& actors)
+	{
+		ForEachValidActor(actors, [&](SDK::AActor* actor)
+		{
+			actor->K2_TeleportTo(teleLocation, teleRotation);
+		});
+	};
+
+	if (manager->pConfig->teleportExploits.killCivilians)
+		teleportActors(manager->actorRegistry.GetCivilians());
+	if (manager->pConfig->teleportExploits.killRats)
+		teleportActors(manager->actorRegistry.GetRats());
+	if (manager->pConfig->teleportExploits.killPolice)
+	{
+		teleportActors(manager->actorRegistry.GetGuards());
+		teleportActors(manager->actorRegistry.GetPolice());
+	}
+	if (manager->pConfig->teleportExploits.killDoors)
+		teleportActors(manager->actorRegistry.GetDoors());
+	if (manager->pConfig->teleportExploits.killCameras)
+		teleportActors(manager->actorRegistry.GetCameras());
 
 	manager->pConfig->teleportExploits.killCivilians = false;
 	manager->pConfig->teleportExploits.killPolice = false;
@@ -1017,27 +884,14 @@ void Hacks::TieUpCivilians()
 
 	if (!Vars::World || Vars::World->Levels.Num() == 0)
 		return;
-
-	SDK::ULevel* currLevel = Vars::World->Levels[0];
-	if (!currLevel)
-		return;
-
-	for (int j = 0; j < currLevel->Actors.Num(); j++)
+	manager->actorRegistry.Refresh(true);
+	ForEachValidActor(manager->actorRegistry.GetCivilians(), [](SDK::AActor* actor)
 	{
-		SDK::AActor* currActor = currLevel->Actors[j];
-		if (!currActor || !currActor->RootComponent)
-			continue;
-		if (Fns::IsBadPoint(currActor))
-			continue;
-
-		if (currActor->GetFullName().find("Civilian_NPC") != std::string::npos)
-		{
-			auto* npc = static_cast<SDK::ANPCBase_C*>(currActor);
-			npc->TiedUp_ = true;
-			if (npc->CharacterMovement)
-				npc->CharacterMovement->DisableMovement();
-		}
-	}
+		auto* npc = static_cast<SDK::ANPCBase_C*>(actor);
+		npc->TiedUp_ = true;
+		if (npc->CharacterMovement)
+			npc->CharacterMovement->DisableMovement();
+	});
 
 	manager->pConfig->tieUpCivilians.enabled = false;
 }

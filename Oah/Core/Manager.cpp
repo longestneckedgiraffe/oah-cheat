@@ -10,6 +10,7 @@ Manager::Manager() noexcept :
 
 void Manager::ClearSDK()
 {
+	actorRegistry.Clear();
 	Vars::World = nullptr;
 	Vars::Engine = nullptr;
 	Vars::MyController = nullptr;
@@ -73,6 +74,8 @@ bool Manager::UpdateSDK()
 
 		Vars::CharacterClass = static_cast<SDK::APlayerCharacter_C*>(Vars::MyPawn);
 	}
+
+	actorRegistry.Refresh();
 	return true;
 }
 

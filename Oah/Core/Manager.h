@@ -3,6 +3,7 @@
 #include <memory>
 
 #include "../Gui/Gui.h"
+#include "ActorRegistry.h"
 #include "Config.h"
 #include "../Hacks/Hacks.h"
 #include "../Esp/Esp.h"
@@ -22,6 +23,7 @@ public:
 	std::unique_ptr<Config> pConfig;
 	std::unique_ptr<Hacks>  pHacks;
 	std::unique_ptr<Esp>    pEsp;
+	ActorRegistry actorRegistry{};
 };
 
 extern std::unique_ptr<Manager> manager;
