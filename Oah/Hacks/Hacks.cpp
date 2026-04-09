@@ -206,6 +206,20 @@ namespace
 		}
 	}
 
+	bool IsLockpickInProgress(SDK::ALock_C* lock)
+	{
+		__try
+		{
+			return lock &&
+				!lock->Unlocked_ &&
+				lock->Tool &&
+				lock->Tool->Picking_;
+		}
+		__except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION)
+		{
+			return false;
+		}
+	}
 	bool IsPickupHeld(SDK::APickupItem_base_C* pickup)
 	{
 		return pickup &&
@@ -747,32 +761,73 @@ void Hacks::JumpHack()
 
 void Hacks::InstantLockpick()
 {
+	static SDK::ALock_C* trackedLock = nullptr;
+	static SDK::AActor* lastHoldingActor = nullptr;
+
 	if (!manager->pConfig->instantLockpick.enabled)
+	{
+		trackedLock = nullptr;
+		lastHoldingActor = nullptr;
 		return;
+	}
 	if (!Vars::World || Vars::World->Levels.Num() == 0)
 		return;
-	manager->actorRegistry.Refresh(true);
+
+	SDK::AActor* holdingActor = Vars::CharacterClass ? Vars::CharacterClass->HoldingActor : nullptr;
+	const bool hadHeldLockpick = lastHoldingActor && lastHoldingActor->IsA(SDK::ALock_pick_C::StaticClass());
+	const bool hasHeldLockpick = holdingActor && holdingActor->IsA(SDK::ALock_pick_C::StaticClass());
 
 	__try
 	{
-		if (Vars::CharacterClass->HoldingActor &&
-			Vars::CharacterClass->HoldingActor->IsA(SDK::ALock_pick_C::StaticClass()))
+		if (hasHeldLockpick)
 		{
-			auto* heldLockpick = static_cast<SDK::ALock_pick_C*>(Vars::CharacterClass->HoldingActor);
-			if (heldLockpick->Lock && TryCompleteActiveLockpick(heldLockpick->Lock))
+			auto* heldLockpick = static_cast<SDK::ALock_pick_C*>(holdingActor);
+			if (heldLockpick->Lock)
+				trackedLock = heldLockpick->Lock;
+
+			if (trackedLock && TryCompleteActiveLockpick(trackedLock))
+			{
+				lastHoldingActor = holdingActor;
 				return;
+			}
 		}
 	}
 	__except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION)
 	{
 	}
 
-	bool completed = false;
-	ForEachValidActor(manager->actorRegistry.GetLocks(), [&](SDK::AActor* actor)
+	if (trackedLock)
 	{
-		if (!completed)
-			completed = TryCompleteActiveLockpick(static_cast<SDK::ALock_C*>(actor));
-	});
+		if (TryCompleteActiveLockpick(trackedLock))
+		{
+			lastHoldingActor = holdingActor;
+			return;
+		}
+
+		if (!IsLockpickInProgress(trackedLock))
+			trackedLock = nullptr;
+	}
+
+	if (!trackedLock && hadHeldLockpick && !hasHeldLockpick)
+	{
+		ForEachValidActor(manager->actorRegistry.GetLocks(), [&](SDK::AActor* actor)
+		{
+			if (!trackedLock)
+			{
+				auto* lock = static_cast<SDK::ALock_C*>(actor);
+				if (IsLockpickInProgress(lock))
+					trackedLock = lock;
+			}
+		});
+
+		if (trackedLock)
+		{
+			if (TryCompleteActiveLockpick(trackedLock))
+				return;
+		}
+	}
+
+	lastHoldingActor = holdingActor;
 }
 
 void Hacks::UnlockDoors()
