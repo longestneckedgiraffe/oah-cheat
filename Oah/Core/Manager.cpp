@@ -21,7 +21,7 @@ void Manager::ClearSDK()
 bool Manager::UpdateSDK()
 {
 	Vars::World = SDK::UWorld::GetWorld();
-	if (Fns::IsBadPoint(Vars::World))
+	if (Fns::IsNullPointer(Vars::World))
 	{
 		ClearSDK();
 		return false;
@@ -30,19 +30,19 @@ bool Manager::UpdateSDK()
 	Vars::Engine = SDK::UEngine::GetEngine();
 
 	{
-		if (Fns::IsBadPoint(Vars::World->OwningGameInstance))
+		if (Fns::IsNullPointer(Vars::World->OwningGameInstance))
 		{
 			ClearSDK();
 			return false;
 		}
 		if (Vars::World->OwningGameInstance->LocalPlayers.Num() == 0 ||
-			Fns::IsBadPoint(Vars::World->OwningGameInstance->LocalPlayers[0]))
+			Fns::IsNullPointer(Vars::World->OwningGameInstance->LocalPlayers[0]))
 		{
 			ClearSDK();
 			return false;
 		}
 		Vars::MyController = Vars::World->OwningGameInstance->LocalPlayers[0]->PlayerController;
-		if (Fns::IsBadPoint(Vars::MyController))
+		if (Fns::IsNullPointer(Vars::MyController))
 		{
 			ClearSDK();
 			return false;
@@ -50,7 +50,7 @@ bool Manager::UpdateSDK()
 	}
 
 	{
-		if (Fns::IsBadPoint(Vars::World->GameState))
+		if (Fns::IsNullPointer(Vars::World->GameState))
 		{
 			ClearSDK();
 			return false;

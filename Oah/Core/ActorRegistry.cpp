@@ -18,6 +18,8 @@
 
 namespace
 {
+	constexpr std::uint32_t kStableRegistryRefreshInterval = 30;
+
 	bool IsCivilianActor(SDK::AActor* actor)
 	{
 		return actor && actor->GetFullName().find("Civilian_NPC") != std::string::npos;
@@ -35,8 +37,8 @@ void ActorRegistry::Refresh(bool force)
 	std::vector<SDK::ULevel*> levels{};
 	levels.reserve(Vars::World->Levels.Num());
 
-	std::vector<std::uintptr_t> levelKeys{};
-	levelKeys.reserve(Vars::World->Levels.Num());
+	std::vector<int> actorCounts{};
+	actorCounts.reserve(Vars::World->Levels.Num());
 
 	for (int i = 0; i < Vars::World->Levels.Num(); i++)
 	{
@@ -45,7 +47,7 @@ void ActorRegistry::Refresh(bool force)
 			continue;
 
 		levels.push_back(level);
-		levelKeys.push_back(reinterpret_cast<std::uintptr_t>(level));
+		actorCounts.push_back(level->Actors.Num());
 	}
 
 	if (levels.empty())
@@ -54,13 +56,24 @@ void ActorRegistry::Refresh(bool force)
 		return;
 	}
 
-	const bool worldChanged = cachedWorld != Vars::World || cachedLevelKeys != levelKeys;
-	if (!force && !worldChanged)
-		return;
+	const bool registryLayoutChanged =
+		cachedWorld != Vars::World ||
+		cachedLevels != levels ||
+		cachedActorCounts != actorCounts;
+	if (!force && !registryLayoutChanged)
+	{
+		if (stableRefreshTicks < kStableRegistryRefreshInterval)
+		{
+			++stableRefreshTicks;
+			return;
+		}
+	}
 
 	Rebuild(levels);
 	cachedWorld = Vars::World;
-	cachedLevelKeys = std::move(levelKeys);
+	cachedLevels = levels;
+	cachedActorCounts = std::move(actorCounts);
+	stableRefreshTicks = 0;
 	++revision;
 }
 
@@ -68,7 +81,8 @@ void ActorRegistry::Clear()
 {
 	const bool hadState =
 		cachedWorld != nullptr ||
-		!cachedLevelKeys.empty() ||
+		!cachedLevels.empty() ||
+		!cachedActorCounts.empty() ||
 		!guards.empty() ||
 		!police.empty() ||
 		!players.empty() ||
@@ -83,7 +97,9 @@ void ActorRegistry::Clear()
 		!civilians.empty();
 
 	cachedWorld = nullptr;
-	cachedLevelKeys.clear();
+	cachedLevels.clear();
+	cachedActorCounts.clear();
+	stableRefreshTicks = 0;
 
 	guards.clear();
 	police.clear();
@@ -117,7 +133,7 @@ void ActorRegistry::Rebuild(const std::vector<SDK::ULevel*>& levels)
 	robberTrucks.clear();
 	civilians.clear();
 
-	std::unordered_set<std::uintptr_t> seenActors{};
+	std::unordered_set<SDK::AActor*> seenActors{};
 	size_t estimatedActors = 0;
 	for (SDK::ULevel* level : levels)
 		estimatedActors += static_cast<size_t>(level->Actors.Num());
@@ -130,11 +146,10 @@ void ActorRegistry::Rebuild(const std::vector<SDK::ULevel*>& levels)
 			SDK::AActor* actor = level->Actors[actorIndex];
 			if (!actor || !actor->RootComponent)
 				continue;
-			if (Fns::IsBadPoint(actor))
+			if (Fns::IsNullPointer(actor))
 				continue;
 
-			const std::uintptr_t actorKey = reinterpret_cast<std::uintptr_t>(actor);
-			if (!seenActors.insert(actorKey).second)
+			if (!seenActors.insert(actor).second)
 				continue;
 
 			if (actor->IsA(SDK::ANPC_Guard_C::StaticClass()))

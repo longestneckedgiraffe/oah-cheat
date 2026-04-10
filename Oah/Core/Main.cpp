@@ -1,6 +1,3 @@
-#define WIN32_LEAN_AND_MEAN
-#define NO_MIN_MAX
-
 #include <iostream>
 #include <string>
 
@@ -168,13 +165,18 @@ DWORD WINAPI MainThread(HMODULE hmodule)
 	return TRUE;
 }
 
+DWORD WINAPI MainThreadEntry(LPVOID parameter)
+{
+	return MainThread(static_cast<HMODULE>(parameter));
+}
+
 BOOL WINAPI DllMain(HMODULE hMod, DWORD dwReason, LPVOID lpReserved)
 {
 	switch (dwReason)
 	{
 	case DLL_PROCESS_ATTACH:
 		DisableThreadLibraryCalls(hMod);
-		CreateThread(nullptr, 0, (LPTHREAD_START_ROUTINE)MainThread, hMod, 0, nullptr);
+		CreateThread(nullptr, 0, MainThreadEntry, hMod, 0, nullptr);
 		break;
 	default:
 		break;

@@ -240,7 +240,10 @@ void Esp::TrackGlowPrimitive(SDK::UPrimitiveComponent* component)
 	if (!component)
 		return;
 
-	const std::uintptr_t componentKey = reinterpret_cast<std::uintptr_t>(component);
+	const std::int32_t componentKey = Fns::GetObjectKey(component);
+	if (componentKey == Fns::InvalidObjectKey)
+		return;
+
 	trackedGlowPrimitives[componentKey] = component;
 }
 
@@ -369,7 +372,7 @@ void Esp::ApplyGlow()
 			SDK::AActor* currActor = cachedActor.actor;
 			if (!currActor || !currActor->RootComponent)
 				continue;
-			if (Fns::IsBadPoint(currActor) || !SDK::UKismetSystemLibrary::IsValid(currActor))
+			if (Fns::IsNullPointer(currActor) || !SDK::UKismetSystemLibrary::IsValid(currActor))
 				continue;
 
 			if (cachedActor.type == TrackedActorType::Guard)
@@ -497,7 +500,7 @@ void Esp::ApplyGlowColorOverride()
 	for (int i = 0; i < currentLevel->Actors.Num(); i++)
 	{
 		SDK::AActor* actor = currentLevel->Actors[i];
-		if (!actor || Fns::IsBadPoint(actor))
+		if (!actor || Fns::IsNullPointer(actor))
 			continue;
 		if (!actor->IsA(SDK::APostProcessVolume::StaticClass()))
 			continue;
@@ -577,7 +580,7 @@ void Esp::DisableAll()
 	{
 		for (SDK::AActor* actor : actors)
 		{
-			if (!actor || !actor->RootComponent || Fns::IsBadPoint(actor))
+			if (!actor || !actor->RootComponent || Fns::IsNullPointer(actor))
 				continue;
 
 			auto* character = static_cast<SDK::ACharacter*>(actor);
@@ -587,7 +590,7 @@ void Esp::DisableAll()
 
 	for (SDK::AActor* actor : manager->actorRegistry.GetGuards())
 	{
-		if (!actor || !actor->RootComponent || Fns::IsBadPoint(actor))
+		if (!actor || !actor->RootComponent || Fns::IsNullPointer(actor))
 			continue;
 
 		auto* guard = static_cast<SDK::ANPC_Guard_C*>(actor);
@@ -601,7 +604,7 @@ void Esp::DisableAll()
 
 	for (SDK::AActor* actor : manager->actorRegistry.GetCameras())
 	{
-		if (!actor || !actor->RootComponent || Fns::IsBadPoint(actor))
+		if (!actor || !actor->RootComponent || Fns::IsNullPointer(actor))
 			continue;
 
 		auto* camera = static_cast<SDK::ACameraBP_C*>(actor);

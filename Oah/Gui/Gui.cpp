@@ -7,6 +7,67 @@
 namespace
 {
 	Present g_fallbackPresent = nullptr;
+
+	bool UpdateSdkAndTickSafely(bool& sdkReady)
+	{
+		sdkReady = false;
+		__try
+		{
+			sdkReady = manager->UpdateSDK();
+			manager->pEsp->Tick();
+			return true;
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			manager->ClearSDK();
+			sdkReady = false;
+			return false;
+		}
+	}
+
+	void RenderOverlaySafely(bool shouldRenderOverlay)
+	{
+		if (!shouldRenderOverlay)
+			return;
+
+		ImGui_ImplDX11_NewFrame();
+		ImGui_ImplWin32_NewFrame();
+		ImGui::NewFrame();
+
+		__try
+		{
+			manager->pGui->RenderImGui();
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			manager->ClearSDK();
+		}
+
+		ImGui::Render();
+
+		__try
+		{
+			ID3D11RenderTargetView* renderTargetView = manager->pGui->mainRenderTargetView.Get();
+			manager->pGui->pContext->OMSetRenderTargets(1, &renderTargetView, nullptr);
+			ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+		}
+	}
+
+	void RunHacksSafely(bool sdkReady)
+	{
+		__try
+		{
+			if (sdkReady)
+				manager->pHacks->RunHacks();
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			manager->ClearSDK();
+		}
+	}
 }
 
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -60,12 +121,18 @@ HRESULT __stdcall Gui::HkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, 
 		g_fallbackPresent = manager->pGui->oPresent;
 
 	InterlockedIncrement(&manager->pGui->activePresentCalls);
+	auto finishPresent = [&](HRESULT result) -> HRESULT
+	{
+		InterlockedDecrement(&manager->pGui->activePresentCalls);
+		return result;
+	};
 
 	auto callOriginalPresent = [&]() -> HRESULT
 	{
-		HRESULT result = manager->pGui->oPresent(pSwapChain, SyncInterval, Flags);
-		InterlockedDecrement(&manager->pGui->activePresentCalls);
-		return result;
+		if (manager->pGui->oPresent)
+			return manager->pGui->oPresent(pSwapChain, SyncInterval, Flags);
+
+		return g_fallbackPresent ? g_fallbackPresent(pSwapChain, SyncInterval, Flags) : S_OK;
 	};
 
 	auto finalizeUnloadPresent = [&]() -> HRESULT
@@ -103,7 +170,7 @@ HRESULT __stdcall Gui::HkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, 
 		__try
 		{
 			observedWorld = SDK::UWorld::GetWorld();
-			if (observedWorld && !Fns::IsBadPoint(observedWorld) && observedWorld->Levels.Num() > 0)
+			if (observedWorld && !Fns::IsNullPointer(observedWorld) && observedWorld->Levels.Num() > 0)
 				observedLevel = observedWorld->Levels[0];
 			else
 				observedWorld = nullptr;
@@ -137,106 +204,74 @@ HRESULT __stdcall Gui::HkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, 
 
 	if (InterlockedCompareExchange(&manager->pGui->cleanupDone, 0, 0) != 0)
 	{
-		return callOriginalPresent();
+		return finishPresent(callOriginalPresent());
 	}
 
 	if (InterlockedCompareExchange(&manager->pGui->unloadRequested, 0, 0) != 0)
-		return finalizeUnloadPresent();
+		return finishPresent(finalizeUnloadPresent());
 
 	const auto [observedWorld, observedLevel] = observeCurrentWorld();
 	cleanupForWorldTransition(observedWorld, observedLevel);
 
 	if (!manager->pGui->initDx)
 	{
-		if (SUCCEEDED(pSwapChain->GetDevice(__uuidof(ID3D11Device), (void**)&manager->pGui->pDevice)))
+		Microsoft::WRL::ComPtr<ID3D11Device> device;
+		if (FAILED(pSwapChain->GetDevice(__uuidof(ID3D11Device), reinterpret_cast<void**>(device.GetAddressOf()))))
+			return finishPresent(callOriginalPresent());
+
+		Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
+		device->GetImmediateContext(context.GetAddressOf());
+		if (!context)
+			return finishPresent(callOriginalPresent());
+
+		DXGI_SWAP_CHAIN_DESC sd{};
+		if (FAILED(pSwapChain->GetDesc(&sd)))
+			return finishPresent(callOriginalPresent());
+
+		Microsoft::WRL::ComPtr<ID3D11Texture2D> backBuffer;
+		if (FAILED(pSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(backBuffer.GetAddressOf()))))
+			return finishPresent(callOriginalPresent());
+
+		Microsoft::WRL::ComPtr<ID3D11RenderTargetView> renderTargetView;
+		if (FAILED(device->CreateRenderTargetView(backBuffer.Get(), nullptr, renderTargetView.GetAddressOf())))
+			return finishPresent(callOriginalPresent());
+
+		HWND outputWindow = sd.OutputWindow;
+		SetLastError(ERROR_SUCCESS);
+		LONG_PTR previousWndProc = SetWindowLongPtr(outputWindow, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(WndProc));
+		if (previousWndProc == 0 && GetLastError() != ERROR_SUCCESS)
 		{
-			manager->pGui->pDevice->GetImmediateContext(&manager->pGui->pContext);
-
-			DXGI_SWAP_CHAIN_DESC sd;
-			pSwapChain->GetDesc(&sd);
-			manager->pGui->window = sd.OutputWindow;
-
-			ID3D11Texture2D* pBackBuffer;
-			pSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID*)&pBackBuffer);
-
-			manager->pGui->pDevice->CreateRenderTargetView(pBackBuffer, NULL, &manager->pGui->mainRenderTargetView);
-
-			pBackBuffer->Release();
-
-			manager->pGui->oWndProc = (WNDPROC)SetWindowLongPtr(manager->pGui->window, GWLP_WNDPROC, (LONG_PTR)WndProc);
-
-			manager->pGui->InitImGui();
-			manager->pGui->initDx = true;
+			return finishPresent(callOriginalPresent());
 		}
-		else
-			return callOriginalPresent();
+
+		manager->pGui->window = outputWindow;
+		manager->pGui->pDevice = std::move(device);
+		manager->pGui->pContext = std::move(context);
+		manager->pGui->mainRenderTargetView = std::move(renderTargetView);
+		manager->pGui->oWndProc = reinterpret_cast<WNDPROC>(previousWndProc);
+
+		manager->pGui->InitImGui();
+		manager->pGui->initDx = true;
 	}
 
 	if (InterlockedCompareExchange(&manager->pGui->unloadRequested, 0, 0) != 0)
-		return finalizeUnloadPresent();
+		return finishPresent(finalizeUnloadPresent());
 
 	if (!manager->pConfig->menu.injected)
 	{
 		manager->pGui->Cleanup();
-		return callOriginalPresent();
+		return finishPresent(callOriginalPresent());
 	}
 
 	manager->pConfig->Hotkeys();
 	const bool shouldRenderOverlay = manager->pConfig->menu.enabled || manager->pEsp->NeedsOverlayRender();
 	bool sdkReady = false;
 
-	__try
-	{
-		sdkReady = manager->UpdateSDK();
-		manager->pEsp->Tick();
-	}
-	__except (EXCEPTION_EXECUTE_HANDLER)
-	{
-		manager->ClearSDK();
-		sdkReady = false;
-	}
+	UpdateSdkAndTickSafely(sdkReady);
+	RenderOverlaySafely(shouldRenderOverlay);
+	RunHacksSafely(sdkReady);
 
-	if (shouldRenderOverlay)
-	{
-		ImGui_ImplDX11_NewFrame();
-		ImGui_ImplWin32_NewFrame();
-		ImGui::NewFrame();
-
-		__try
-		{
-			manager->pGui->RenderImGui();
-		}
-		__except (EXCEPTION_EXECUTE_HANDLER)
-		{
-			manager->ClearSDK();
-		}
-
-		ImGui::Render();
-	}
-
-	__try
-	{
-		if (sdkReady)
-			manager->pHacks->RunHacks();
-	}
-	__except (EXCEPTION_EXECUTE_HANDLER)
-	{
-		manager->ClearSDK();
-	}
-
-	if (shouldRenderOverlay)
-	{
-		__try
-		{
-			manager->pGui->pContext->OMSetRenderTargets(1, &manager->pGui->mainRenderTargetView, NULL);
-			ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
-		}
-		__except (EXCEPTION_EXECUTE_HANDLER)
-		{
-		}
-	}
-
-	return callOriginalPresent();
+	return finishPresent(callOriginalPresent());
 }
 
 void Gui::InitImGui()
@@ -250,7 +285,7 @@ void Gui::InitImGui()
 	SetupImGuiStyle();
 
 	ImGui_ImplWin32_Init(window);
-	ImGui_ImplDX11_Init(pDevice, pContext);
+	ImGui_ImplDX11_Init(pDevice.Get(), pContext.Get());
 }
 
 void Gui::RenderImGui()
@@ -268,7 +303,7 @@ void Gui::Cleanup()
 	if (window && oWndProc)
 	{
 		SetLastError(ERROR_SUCCESS);
-		const LONG_PTR restoreResult = SetWindowLongPtr(window, GWLP_WNDPROC, (LONG_PTR)(oWndProc));
+		const LONG_PTR restoreResult = SetWindowLongPtr(window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(oWndProc));
 		if (restoreResult != 0 || GetLastError() == ERROR_SUCCESS)
 			oWndProc = nullptr;
 	}
@@ -282,21 +317,19 @@ void Gui::Cleanup()
 
 	if (mainRenderTargetView)
 	{
-		mainRenderTargetView->Release();
-		mainRenderTargetView = nullptr;
+		mainRenderTargetView.Reset();
 	}
 
 	if (pContext)
 	{
-		pContext->Release();
-		pContext = nullptr;
+		pContext.Reset();
 	}
 	if (pDevice)
 	{
-		pDevice->Release();
-		pDevice = nullptr;
+		pDevice.Reset();
 	}
 
+	window = nullptr;
 	trackedWorld = nullptr;
 	trackedLevel = nullptr;
 	InterlockedExchange(&cleanupDone, 1);

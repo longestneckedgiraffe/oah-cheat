@@ -43,7 +43,7 @@ namespace
 		{
 			if (!actor || !actor->RootComponent)
 				continue;
-			if (Fns::IsBadPoint(actor))
+			if (Fns::IsNullPointer(actor))
 				continue;
 
 			func(actor);
@@ -58,6 +58,7 @@ namespace
 
 	struct TrackedWeaponAmmoState
 	{
+		std::int32_t objectKey{ Fns::InvalidObjectKey };
 		SDK::AGunBase_C* weapon{};
 		WeaponAmmoState state{};
 	};
@@ -90,12 +91,15 @@ namespace
 
 	struct CameraIgnoredState
 	{
+		std::int32_t objectKey{ Fns::InvalidObjectKey };
 		SDK::ACameraBP_C* camera{};
 		bool ignored{};
 	};
 
 	struct WeaponModState
 	{
+		std::int32_t objectKey{ Fns::InvalidObjectKey };
+		std::int32_t characterObjectKey{ Fns::InvalidObjectKey };
 		SDK::AGunBase_C* weapon{};
 		SDK::APlayerCharacter_C* character{};
 		float coolDownTime{};
@@ -105,9 +109,9 @@ namespace
 		bool reloading{};
 	};
 
-	static std::unordered_map<std::uintptr_t, TrackedWeaponAmmoState> g_trackedAmmoWeapons;
-	static std::unordered_map<std::uintptr_t, CameraIgnoredState> g_trackedCameraIgnoredStates;
-	static std::unordered_map<std::uintptr_t, WeaponModState> g_trackedWeaponModStates;
+	static std::unordered_map<std::int32_t, TrackedWeaponAmmoState> g_trackedAmmoWeapons;
+	static std::unordered_map<std::int32_t, CameraIgnoredState> g_trackedCameraIgnoredStates;
+	static std::unordered_map<std::int32_t, WeaponModState> g_trackedWeaponModStates;
 	static ThirdPersonState g_thirdPersonState;
 	static CharacterMutationState g_characterMutationState;
 	static bool g_disableCamerasState = false;
@@ -237,7 +241,10 @@ namespace
 		if (!camera)
 			return;
 
-		const std::uintptr_t cameraKey = reinterpret_cast<std::uintptr_t>(camera);
+		const std::int32_t cameraKey = Fns::GetObjectKey(camera);
+		if (cameraKey == Fns::InvalidObjectKey)
+			return;
+
 		if (g_trackedCameraIgnoredStates.contains(cameraKey))
 			return;
 
@@ -245,7 +252,7 @@ namespace
 		if (!TryReadCameraIgnoredState(camera, ignored))
 			return;
 
-		g_trackedCameraIgnoredStates.emplace(cameraKey, CameraIgnoredState{ camera, ignored });
+		g_trackedCameraIgnoredStates.emplace(cameraKey, CameraIgnoredState{ cameraKey, camera, ignored });
 	}
 
 	void RestoreTrackedCameraIgnoredStates()
@@ -255,7 +262,7 @@ namespace
 			__try
 			{
 				SDK::ACameraBP_C* camera = trackedCameraEntry.second.camera;
-				if (!camera)
+				if (!camera || !Fns::HasObjectKey(camera, trackedCameraEntry.second.objectKey))
 					continue;
 
 				camera->Ignored_ = trackedCameraEntry.second.ignored;
@@ -280,6 +287,8 @@ namespace
 			if (!weapon || !character)
 				return false;
 
+			state.objectKey = Fns::GetObjectKey(weapon);
+			state.characterObjectKey = Fns::GetObjectKey(character);
 			state.weapon = weapon;
 			state.character = character;
 			state.coolDownTime = weapon->CoolDownTime;
@@ -300,7 +309,10 @@ namespace
 		if (!weapon || !character)
 			return;
 
-		const std::uintptr_t weaponKey = reinterpret_cast<std::uintptr_t>(weapon);
+		const std::int32_t weaponKey = Fns::GetObjectKey(weapon);
+		if (weaponKey == Fns::InvalidObjectKey)
+			return;
+
 		if (g_trackedWeaponModStates.contains(weaponKey))
 			return;
 
@@ -318,7 +330,7 @@ namespace
 			__try
 			{
 				const WeaponModState& state = trackedWeaponEntry.second;
-				if (state.weapon)
+				if (state.weapon && Fns::HasObjectKey(state.weapon, state.objectKey))
 				{
 					state.weapon->CoolDownTime = state.coolDownTime;
 					state.weapon->CanShoot_ = state.canShoot;
@@ -326,7 +338,7 @@ namespace
 					state.weapon->BulletAmount = state.bulletAmount;
 				}
 
-				if (state.character)
+				if (state.character && Fns::HasObjectKey(state.character, state.characterObjectKey))
 					state.character->Reloading_ = state.reloading;
 			}
 			__except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION)
@@ -341,11 +353,11 @@ namespace
 	{
 		if (!Vars::CharacterClass || !Vars::CharacterClass->ArmorChildActor)
 			return nullptr;
-		if (!Vars::CharacterClass->ArmorChildActor->ChildActor)
+		SDK::AActor* childActor = Vars::CharacterClass->ArmorChildActor->ChildActor;
+		if (!childActor || !childActor->IsA(SDK::AArmor_Light_C::StaticClass()))
 			return nullptr;
 
-		auto* armor = static_cast<SDK::AArmor_Light_C*>(Vars::CharacterClass->ArmorChildActor->ChildActor);
-		return armor->IsA(SDK::AArmor_Light_C::StaticClass()) ? armor : nullptr;
+		return static_cast<SDK::AArmor_Light_C*>(childActor);
 	}
 
 	bool TryReadWeaponAmmoState(SDK::AGunBase_C* weapon, WeaponAmmoState& state)
@@ -387,7 +399,7 @@ namespace
 		__try
 		{
 			SDK::AGunBase_C* weapon = trackedWeapon.weapon;
-			if (!weapon)
+			if (!weapon || !Fns::HasObjectKey(weapon, trackedWeapon.objectKey))
 				return false;
 
 			int bulletsToRestore = trackedWeapon.state.bulletsLeft;
@@ -411,7 +423,10 @@ namespace
 		if (!weapon)
 			return;
 
-		const std::uintptr_t weaponKey = reinterpret_cast<std::uintptr_t>(weapon);
+		const std::int32_t weaponKey = Fns::GetObjectKey(weapon);
+		if (weaponKey == Fns::InvalidObjectKey)
+			return;
+
 		if (g_trackedAmmoWeapons.contains(weaponKey))
 			return;
 
@@ -419,7 +434,7 @@ namespace
 		if (!TryReadWeaponAmmoState(weapon, state))
 			return;
 
-		g_trackedAmmoWeapons.emplace(weaponKey, TrackedWeaponAmmoState{ weapon, state });
+		g_trackedAmmoWeapons.emplace(weaponKey, TrackedWeaponAmmoState{ weaponKey, weapon, state });
 	}
 
 	bool TryCompleteActiveLockpick(SDK::ALock_C* lock)

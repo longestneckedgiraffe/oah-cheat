@@ -77,8 +77,8 @@ private:
 	int espFrameCounter{ 0 };
 	std::uint64_t cachedActorRegistryRevision{ 0 };
 	std::vector<CachedEspActor> cachedEspActors{};
-	std::unordered_map<std::uintptr_t, SDK::UPrimitiveComponent*> trackedGlowPrimitives{};
-	std::unordered_map<std::uintptr_t, SDK::FVector> liveBulletPositions{};
+	std::unordered_map<std::int32_t, SDK::UPrimitiveComponent*> trackedGlowPrimitives{};
+	std::unordered_map<std::int32_t, SDK::FVector> liveBulletPositions{};
 	std::vector<BulletTracerSegment> bulletTracerSegments{};
 	std::vector<GlowBlendableOverride> glowBlendableOverrides{};
 	SDK::ULevel* glowOverrideLevel{ nullptr };

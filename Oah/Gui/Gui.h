@@ -6,11 +6,11 @@ class Gui
 {
 public:
 	Present oPresent = nullptr;
-	HWND window = NULL;
+	HWND window = nullptr;
 	WNDPROC oWndProc = nullptr;
-	ID3D11Device* pDevice = NULL;
-	ID3D11DeviceContext* pContext = NULL;
-	ID3D11RenderTargetView* mainRenderTargetView = NULL;
+	Microsoft::WRL::ComPtr<ID3D11Device> pDevice;
+	Microsoft::WRL::ComPtr<ID3D11DeviceContext> pContext;
+	Microsoft::WRL::ComPtr<ID3D11RenderTargetView> mainRenderTargetView;
 
 	bool initDx = false;
 	volatile LONG cleanupDone = 0;

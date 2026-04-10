@@ -29,7 +29,9 @@ private:
 	void Rebuild(const std::vector<SDK::ULevel*>& levels);
 
 	SDK::UWorld* cachedWorld{ nullptr };
-	std::vector<std::uintptr_t> cachedLevelKeys{};
+	std::vector<SDK::ULevel*> cachedLevels{};
+	std::vector<int> cachedActorCounts{};
+	std::uint32_t stableRefreshTicks{ 0 };
 	std::uint64_t revision{ 0 };
 
 	std::vector<SDK::AActor*> guards{};

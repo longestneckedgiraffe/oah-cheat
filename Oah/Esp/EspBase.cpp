@@ -448,7 +448,7 @@ void Esp::UpdateBulletTracers()
 			}),
 		bulletTracerSegments.end());
 
-	std::unordered_set<std::uintptr_t> activeBullets;
+	std::unordered_set<std::int32_t> activeBullets;
 	activeBullets.reserve(liveBulletPositions.size() + 16);
 
 	SDK::ULevel* currLevel = Vars::World->Levels[0];
@@ -460,12 +460,15 @@ void Esp::UpdateBulletTracers()
 		SDK::AActor* currActor = currLevel->Actors[j];
 		if (!currActor || !currActor->RootComponent)
 			continue;
-		if (Fns::IsBadPoint(currActor))
+		if (Fns::IsNullPointer(currActor))
 			continue;
 		if (!IsBulletTraceActor(currActor))
 			continue;
 
-		const std::uintptr_t actorKey = reinterpret_cast<std::uintptr_t>(currActor);
+		const std::int32_t actorKey = Fns::GetObjectKey(currActor);
+		if (actorKey == Fns::InvalidObjectKey)
+			continue;
+
 		activeBullets.insert(actorKey);
 
 		const SDK::FVector currentPosition = currActor->K2_GetActorLocation();
@@ -550,7 +553,7 @@ void Esp::RenderEntityBoxes()
 		SDK::AActor* currActor = cachedActor.actor;
 		if (!currActor || !currActor->RootComponent)
 			continue;
-		if (Fns::IsBadPoint(currActor))
+		if (Fns::IsNullPointer(currActor))
 			continue;
 
 		bool shouldRender = false;

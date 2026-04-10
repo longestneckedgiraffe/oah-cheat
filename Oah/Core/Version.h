@@ -1,5 +1,5 @@
 #pragma once
 
-#define APP_RELEASE_VERSION "1.0.0"
-#define APP_VERSIONNR 1000
-#define APP_NAME "ImGui"
+inline constexpr const char APP_RELEASE_VERSION[] = "1.0.0";
+inline constexpr int APP_VERSIONNR = 1000;
+inline constexpr const char APP_NAME[] = "ImGui";

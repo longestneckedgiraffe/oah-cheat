@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdlib>
 #include <memory>
 
 #include "../Gui/Gui.h"
@@ -8,7 +9,11 @@
 #include "../Hacks/Hacks.h"
 #include "../Esp/Esp.h"
 
-#define ASSERT(x) { MessageBoxA(NULL, NULL, x, NULL); exit(0); }
+[[noreturn]] inline void FailFast(const char* message)
+{
+	MessageBoxA(nullptr, message, "Assertion Failed", MB_OK | MB_ICONERROR);
+	std::exit(EXIT_FAILURE);
+}
 
 class Manager
 {
