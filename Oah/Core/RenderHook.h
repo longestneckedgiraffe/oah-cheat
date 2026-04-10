@@ -13,12 +13,12 @@ namespace RenderHook
 		CreateWindowFailed,
 		CreateSwapChainFailed,
 		PresentNotFound,
-		MinHookInitializeFailed,
-		MinHookCreateFailed,
-		MinHookEnableFailed
+		VtablePatchFailed,
+		VtableRestoreFailed
 	};
 
 	Status Initialize(Present hookFunction, Present* originalFunction);
+	void Disable();
 	void Shutdown();
 	const char* StatusToString(Status status);
 }

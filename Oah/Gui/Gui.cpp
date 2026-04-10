@@ -1,6 +1,13 @@
 #include <filesystem>
+#include <utility>
 #include "../Core/Manager.h"
+#include "../Core/RenderHook.h"
 #include "Gui.h"
+
+namespace
+{
+	Present g_fallbackPresent = nullptr;
+}
 
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 LRESULT __stdcall WndProc(const HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
@@ -8,7 +15,10 @@ LRESULT __stdcall WndProc(const HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 	if (!manager || !manager->pGui)
 		return DefWindowProc(hWnd, uMsg, wParam, lParam);
 
-	if (!manager->pConfig || !manager->pConfig->menu.injected || manager->pGui->cleanupDone)
+	if (!manager->pConfig ||
+		!manager->pConfig->menu.injected ||
+		InterlockedCompareExchange(&manager->pGui->cleanupDone, 0, 0) != 0 ||
+		InterlockedCompareExchange(&manager->pGui->unloadRequested, 0, 0) != 0)
 	{
 		if (manager->pGui->oWndProc)
 			return CallWindowProc(manager->pGui->oWndProc, hWnd, uMsg, wParam, lParam);
@@ -43,14 +53,98 @@ LRESULT __stdcall WndProc(const HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 
 HRESULT __stdcall Gui::HkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags)
 {
+	if (!manager || !manager->pGui)
+		return g_fallbackPresent ? g_fallbackPresent(pSwapChain, SyncInterval, Flags) : S_OK;
+
+	if (manager->pGui->oPresent)
+		g_fallbackPresent = manager->pGui->oPresent;
+
 	InterlockedIncrement(&manager->pGui->activePresentCalls);
 
-	if (manager->pGui->cleanupDone)
+	auto callOriginalPresent = [&]() -> HRESULT
 	{
 		HRESULT result = manager->pGui->oPresent(pSwapChain, SyncInterval, Flags);
 		InterlockedDecrement(&manager->pGui->activePresentCalls);
 		return result;
+	};
+
+	auto finalizeUnloadPresent = [&]() -> HRESULT
+	{
+		if (InterlockedCompareExchange(&manager->pGui->worldCleanupStarted, 1, 0) == 0)
+		{
+			__try
+			{
+				const bool sdkReady = manager->UpdateSDK();
+				if (sdkReady)
+					manager->pHacks->DisableAll();
+				manager->pEsp->DisableAll();
+			}
+			__except (EXCEPTION_EXECUTE_HANDLER)
+			{
+				manager->ClearSDK();
+			}
+
+			InterlockedExchange(&manager->pGui->worldCleanupDone, 1);
+		}
+
+		manager->pGui->Cleanup();
+
+		if (InterlockedCompareExchange(&manager->pGui->hookDisableStarted, 1, 0) == 0)
+			RenderHook::Disable();
+
+		return callOriginalPresent();
+	};
+
+	auto observeCurrentWorld = [&]() -> std::pair<SDK::UWorld*, SDK::ULevel*>
+	{
+		SDK::UWorld* observedWorld = nullptr;
+		SDK::ULevel* observedLevel = nullptr;
+
+		__try
+		{
+			observedWorld = SDK::UWorld::GetWorld();
+			if (observedWorld && !Fns::IsBadPoint(observedWorld) && observedWorld->Levels.Num() > 0)
+				observedLevel = observedWorld->Levels[0];
+			else
+				observedWorld = nullptr;
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			observedWorld = nullptr;
+			observedLevel = nullptr;
+		}
+
+		return { observedWorld, observedLevel };
+	};
+
+	auto cleanupForWorldTransition = [&](SDK::UWorld* observedWorld, SDK::ULevel* observedLevel)
+	{
+		if (!observedWorld)
+			return;
+
+		if (manager->pGui->trackedWorld &&
+			(manager->pGui->trackedWorld != observedWorld || manager->pGui->trackedLevel != observedLevel))
+		{
+			manager->pHacks->OnWorldChanged();
+			manager->pEsp->OnWorldChanged();
+			manager->actorRegistry.Clear();
+			manager->ClearSDK();
+		}
+
+		manager->pGui->trackedWorld = observedWorld;
+		manager->pGui->trackedLevel = observedLevel;
+	};
+
+	if (InterlockedCompareExchange(&manager->pGui->cleanupDone, 0, 0) != 0)
+	{
+		return callOriginalPresent();
 	}
+
+	if (InterlockedCompareExchange(&manager->pGui->unloadRequested, 0, 0) != 0)
+		return finalizeUnloadPresent();
+
+	const auto [observedWorld, observedLevel] = observeCurrentWorld();
+	cleanupForWorldTransition(observedWorld, observedLevel);
 
 	if (!manager->pGui->initDx)
 	{
@@ -75,32 +169,31 @@ HRESULT __stdcall Gui::HkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, 
 			manager->pGui->initDx = true;
 		}
 		else
-		{
-			HRESULT result = manager->pGui->oPresent(pSwapChain, SyncInterval, Flags);
-			InterlockedDecrement(&manager->pGui->activePresentCalls);
-			return result;
-		}
+			return callOriginalPresent();
 	}
+
+	if (InterlockedCompareExchange(&manager->pGui->unloadRequested, 0, 0) != 0)
+		return finalizeUnloadPresent();
 
 	if (!manager->pConfig->menu.injected)
 	{
 		manager->pGui->Cleanup();
-		HRESULT result = manager->pGui->oPresent(pSwapChain, SyncInterval, Flags);
-		InterlockedDecrement(&manager->pGui->activePresentCalls);
-		return result;
+		return callOriginalPresent();
 	}
 
 	manager->pConfig->Hotkeys();
 	const bool shouldRenderOverlay = manager->pConfig->menu.enabled || manager->pEsp->NeedsOverlayRender();
+	bool sdkReady = false;
 
 	__try
 	{
-		manager->UpdateSDK();
+		sdkReady = manager->UpdateSDK();
 		manager->pEsp->Tick();
 	}
 	__except (EXCEPTION_EXECUTE_HANDLER)
 	{
 		manager->ClearSDK();
+		sdkReady = false;
 	}
 
 	if (shouldRenderOverlay)
@@ -123,7 +216,8 @@ HRESULT __stdcall Gui::HkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, 
 
 	__try
 	{
-		manager->pHacks->RunHacks();
+		if (sdkReady)
+			manager->pHacks->RunHacks();
 	}
 	__except (EXCEPTION_EXECUTE_HANDLER)
 	{
@@ -142,9 +236,7 @@ HRESULT __stdcall Gui::HkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, 
 		}
 	}
 
-	HRESULT result = manager->pGui->oPresent(pSwapChain, SyncInterval, Flags);
-	InterlockedDecrement(&manager->pGui->activePresentCalls);
-	return result;
+	return callOriginalPresent();
 }
 
 void Gui::InitImGui()
@@ -164,7 +256,8 @@ void Gui::InitImGui()
 void Gui::RenderImGui()
 {
 	manager->pGui->RenderMainWindow();
-	manager->pEsp->RenderOverlay();
+	if (Vars::World && Vars::MyController && Vars::CharacterClass)
+		manager->pEsp->RenderOverlay();
 }
 
 void Gui::Cleanup()
@@ -174,8 +267,10 @@ void Gui::Cleanup()
 
 	if (window && oWndProc)
 	{
-		SetWindowLongPtr(window, GWLP_WNDPROC, (LONG_PTR)(oWndProc));
-		oWndProc = nullptr;
+		SetLastError(ERROR_SUCCESS);
+		const LONG_PTR restoreResult = SetWindowLongPtr(window, GWLP_WNDPROC, (LONG_PTR)(oWndProc));
+		if (restoreResult != 0 || GetLastError() == ERROR_SUCCESS)
+			oWndProc = nullptr;
 	}
 
 	if (ImGui::GetCurrentContext())
@@ -202,5 +297,7 @@ void Gui::Cleanup()
 		pDevice = nullptr;
 	}
 
-	cleanupDone = true;
+	trackedWorld = nullptr;
+	trackedLevel = nullptr;
+	InterlockedExchange(&cleanupDone, 1);
 }

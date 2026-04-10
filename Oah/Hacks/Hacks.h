@@ -4,6 +4,8 @@ class Hacks
 {
 public:
 	void RunHacks();
+	void DisableAll();
+	void OnWorldChanged();
 
 private:
 	void Aimbot();

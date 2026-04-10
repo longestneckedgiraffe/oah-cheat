@@ -13,9 +13,15 @@ public:
 	ID3D11RenderTargetView* mainRenderTargetView = NULL;
 
 	bool initDx = false;
-	bool cleanupDone = false;
+	volatile LONG cleanupDone = 0;
+	volatile LONG unloadRequested = 0;
+	volatile LONG worldCleanupStarted = 0;
+	volatile LONG worldCleanupDone = 0;
 	volatile LONG cleanupStarted = 0;
+	volatile LONG hookDisableStarted = 0;
 	volatile LONG activePresentCalls = 0;
+	SDK::UWorld* trackedWorld = nullptr;
+	SDK::ULevel* trackedLevel = nullptr;
 
 	static HRESULT __stdcall HkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT Flags);
 

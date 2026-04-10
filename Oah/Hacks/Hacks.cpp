@@ -72,8 +72,60 @@ namespace
 		bool initialized{ false };
 	};
 
+	struct CharacterMutationState
+	{
+		SDK::APlayerCharacter_C* character{};
+		SDK::UCharacterMovementComponent* movement{};
+		float maxWalkSpeed{};
+		float maxAcceleration{};
+		float jumpZVelocity{};
+		float maxFlySpeed{};
+		SDK::EMovementMode movementMode{};
+		std::uint8_t customMovementMode{};
+		bool actorEnableCollision{};
+		int damageImmunity{};
+		float drillImmunityTime{};
+		bool initialized{ false };
+	};
+
+	struct CameraIgnoredState
+	{
+		SDK::ACameraBP_C* camera{};
+		bool ignored{};
+	};
+
+	struct WeaponModState
+	{
+		SDK::AGunBase_C* weapon{};
+		SDK::APlayerCharacter_C* character{};
+		float coolDownTime{};
+		bool canShoot{};
+		bool autoFire{};
+		int bulletAmount{};
+		bool reloading{};
+	};
+
 	static std::unordered_map<std::uintptr_t, TrackedWeaponAmmoState> g_trackedAmmoWeapons;
+	static std::unordered_map<std::uintptr_t, CameraIgnoredState> g_trackedCameraIgnoredStates;
+	static std::unordered_map<std::uintptr_t, WeaponModState> g_trackedWeaponModStates;
 	static ThirdPersonState g_thirdPersonState;
+	static CharacterMutationState g_characterMutationState;
+	static bool g_disableCamerasState = false;
+	static int g_disableCamerasFrameCounter = 0;
+	static bool g_speedHackState = false;
+	static bool g_bhopWasJumping = false;
+	static bool g_flyHackState = false;
+	static bool g_noclipState = false;
+	static bool g_unlimitedAmmoState = false;
+	static SDK::FName g_headBone = SDK::FName();
+	static bool g_headBoneInitialized = false;
+	static bool g_jumpHackState = false;
+	static SDK::ALock_C* g_trackedLock = nullptr;
+	static SDK::AActor* g_lastHoldingActor = nullptr;
+	static bool g_invulnerableState = false;
+	static int g_invulnerableFrameCounter = 0;
+	static int g_maxHealthFrameCounter = 0;
+	static int g_maxArmorFrameCounter = 0;
 
 	void RestoreThirdPersonState()
 	{
@@ -93,6 +145,196 @@ namespace
 		}
 
 		g_thirdPersonState = {};
+	}
+
+	bool CaptureCharacterMutationStateIfNeeded()
+	{
+		if (!Vars::CharacterClass || !Vars::CharacterClass->CharacterMovement)
+			return false;
+
+		if (g_characterMutationState.initialized &&
+			g_characterMutationState.character == Vars::CharacterClass &&
+			g_characterMutationState.movement == Vars::CharacterClass->CharacterMovement)
+		{
+			return true;
+		}
+
+		g_characterMutationState = {};
+
+		__try
+		{
+			g_characterMutationState.character = Vars::CharacterClass;
+			g_characterMutationState.movement = Vars::CharacterClass->CharacterMovement;
+			g_characterMutationState.maxWalkSpeed = Vars::CharacterClass->CharacterMovement->MaxWalkSpeed;
+			g_characterMutationState.maxAcceleration = Vars::CharacterClass->CharacterMovement->MaxAcceleration;
+			g_characterMutationState.jumpZVelocity = Vars::CharacterClass->CharacterMovement->JumpZVelocity;
+			g_characterMutationState.maxFlySpeed = Vars::CharacterClass->CharacterMovement->MaxFlySpeed;
+			g_characterMutationState.movementMode = Vars::CharacterClass->CharacterMovement->MovementMode;
+			g_characterMutationState.customMovementMode = Vars::CharacterClass->CharacterMovement->CustomMovementMode;
+			g_characterMutationState.actorEnableCollision = Vars::CharacterClass->bActorEnableCollision;
+			g_characterMutationState.damageImmunity = Vars::CharacterClass->DamageImmunity;
+			g_characterMutationState.drillImmunityTime = Vars::CharacterClass->DrillImmunityTime;
+			g_characterMutationState.initialized = true;
+			return true;
+		}
+		__except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION)
+		{
+			g_characterMutationState = {};
+			return false;
+		}
+	}
+
+	void RestoreCharacterMutationState()
+	{
+		if (!g_characterMutationState.initialized)
+			return;
+
+		__try
+		{
+			if (g_characterMutationState.character)
+			{
+				g_characterMutationState.character->SetActorEnableCollision(g_characterMutationState.actorEnableCollision);
+				g_characterMutationState.character->DamageImmunity = g_characterMutationState.damageImmunity;
+				g_characterMutationState.character->DrillImmunityTime = g_characterMutationState.drillImmunityTime;
+			}
+
+			if (g_characterMutationState.movement)
+			{
+				g_characterMutationState.movement->MaxWalkSpeed = g_characterMutationState.maxWalkSpeed;
+				g_characterMutationState.movement->MaxAcceleration = g_characterMutationState.maxAcceleration;
+				g_characterMutationState.movement->JumpZVelocity = g_characterMutationState.jumpZVelocity;
+				g_characterMutationState.movement->MaxFlySpeed = g_characterMutationState.maxFlySpeed;
+				g_characterMutationState.movement->SetMovementMode(
+					g_characterMutationState.movementMode,
+					g_characterMutationState.customMovementMode);
+			}
+		}
+		__except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION)
+		{
+		}
+
+		g_characterMutationState = {};
+	}
+
+	bool TryReadCameraIgnoredState(SDK::ACameraBP_C* camera, bool& ignored)
+	{
+		__try
+		{
+			if (!camera)
+				return false;
+
+			ignored = camera->Ignored_;
+			return true;
+		}
+		__except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION)
+		{
+			return false;
+		}
+	}
+
+	void TrackCameraIgnoredStateIfNeeded(SDK::ACameraBP_C* camera)
+	{
+		if (!camera)
+			return;
+
+		const std::uintptr_t cameraKey = reinterpret_cast<std::uintptr_t>(camera);
+		if (g_trackedCameraIgnoredStates.contains(cameraKey))
+			return;
+
+		bool ignored = false;
+		if (!TryReadCameraIgnoredState(camera, ignored))
+			return;
+
+		g_trackedCameraIgnoredStates.emplace(cameraKey, CameraIgnoredState{ camera, ignored });
+	}
+
+	void RestoreTrackedCameraIgnoredStates()
+	{
+		for (const auto& trackedCameraEntry : g_trackedCameraIgnoredStates)
+		{
+			__try
+			{
+				SDK::ACameraBP_C* camera = trackedCameraEntry.second.camera;
+				if (!camera)
+					continue;
+
+				camera->Ignored_ = trackedCameraEntry.second.ignored;
+				if (camera->SpotPlayerComponent)
+				{
+					camera->SpotPlayerComponent->SpottedPlayer = nullptr;
+					camera->SpotPlayerComponent->Spot_time = 0.0f;
+				}
+			}
+			__except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION)
+			{
+			}
+		}
+
+		g_trackedCameraIgnoredStates.clear();
+	}
+
+	bool TryReadWeaponModState(SDK::AGunBase_C* weapon, SDK::APlayerCharacter_C* character, WeaponModState& state)
+	{
+		__try
+		{
+			if (!weapon || !character)
+				return false;
+
+			state.weapon = weapon;
+			state.character = character;
+			state.coolDownTime = weapon->CoolDownTime;
+			state.canShoot = weapon->CanShoot_;
+			state.autoFire = weapon->Auto_;
+			state.bulletAmount = weapon->BulletAmount;
+			state.reloading = character->Reloading_;
+			return true;
+		}
+		__except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION)
+		{
+			return false;
+		}
+	}
+
+	void TrackWeaponModStateIfNeeded(SDK::AGunBase_C* weapon, SDK::APlayerCharacter_C* character)
+	{
+		if (!weapon || !character)
+			return;
+
+		const std::uintptr_t weaponKey = reinterpret_cast<std::uintptr_t>(weapon);
+		if (g_trackedWeaponModStates.contains(weaponKey))
+			return;
+
+		WeaponModState state{};
+		if (!TryReadWeaponModState(weapon, character, state))
+			return;
+
+		g_trackedWeaponModStates.emplace(weaponKey, state);
+	}
+
+	void RestoreTrackedWeaponModStates()
+	{
+		for (const auto& trackedWeaponEntry : g_trackedWeaponModStates)
+		{
+			__try
+			{
+				const WeaponModState& state = trackedWeaponEntry.second;
+				if (state.weapon)
+				{
+					state.weapon->CoolDownTime = state.coolDownTime;
+					state.weapon->CanShoot_ = state.canShoot;
+					state.weapon->Auto_ = state.autoFire;
+					state.weapon->BulletAmount = state.bulletAmount;
+				}
+
+				if (state.character)
+					state.character->Reloading_ = state.reloading;
+			}
+			__except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION)
+			{
+			}
+		}
+
+		g_trackedWeaponModStates.clear();
 	}
 
 	SDK::AArmor_Light_C* GetEquippedArmorActor()
@@ -299,6 +541,51 @@ void Hacks::RunHacks()
 	MaxArmor();
 }
 
+void Hacks::DisableAll()
+{
+	__try
+	{
+		RestoreThirdPersonState();
+
+		for (const auto& trackedWeaponEntry : g_trackedAmmoWeapons)
+			TryRestoreWeaponAmmoState(trackedWeaponEntry.second);
+		g_trackedAmmoWeapons.clear();
+		RestoreTrackedWeaponModStates();
+		RestoreTrackedCameraIgnoredStates();
+
+		if (Vars::CharacterClass && (Vars::CharacterClass->bPressedJump || IsKeyHeld(VK_SPACE)))
+			Vars::CharacterClass->StopJumping();
+
+		RestoreCharacterMutationState();
+	}
+	__except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION)
+	{
+	}
+}
+
+void Hacks::OnWorldChanged()
+{
+	g_trackedAmmoWeapons.clear();
+	g_trackedCameraIgnoredStates.clear();
+	g_trackedWeaponModStates.clear();
+	g_thirdPersonState = {};
+	g_characterMutationState = {};
+	g_disableCamerasState = false;
+	g_disableCamerasFrameCounter = 0;
+	g_speedHackState = false;
+	g_bhopWasJumping = false;
+	g_flyHackState = false;
+	g_noclipState = false;
+	g_unlimitedAmmoState = false;
+	g_jumpHackState = false;
+	g_trackedLock = nullptr;
+	g_lastHoldingActor = nullptr;
+	g_invulnerableState = false;
+	g_invulnerableFrameCounter = 0;
+	g_maxHealthFrameCounter = 0;
+	g_maxArmorFrameCounter = 0;
+}
+
 void Hacks::Aimbot()
 {
 	if (!manager->pConfig->aimbot.enabled)
@@ -316,12 +603,10 @@ void Hacks::Aimbot()
 	const bool visibleOnly = ShouldRestrictAimbotToVisibleTargets(*manager->pConfig);
 	if (manager->actorRegistry.GetGuards().empty() && manager->actorRegistry.GetPolice().empty())
 		manager->actorRegistry.Refresh(true);
-	static SDK::FName headBone = SDK::FName();
-	static bool headBoneInitialized = false;
-	if (!headBoneInitialized)
+	if (!g_headBoneInitialized)
 	{
-		GetStaticName(L"head", headBone);
-		headBoneInitialized = true;
+		GetStaticName(L"head", g_headBone);
+		g_headBoneInitialized = true;
 	}
 
 	SDK::AActor* bestTarget = nullptr;
@@ -342,7 +627,7 @@ void Hacks::Aimbot()
 			if (visibleOnly && !Vars::MyController->LineOfSightTo(currActor, cameraLocation, false))
 				return;
 
-			SDK::FVector headLocation = character->Mesh->GetSocketLocation(headBone);
+			SDK::FVector headLocation = character->Mesh->GetSocketLocation(g_headBone);
 			headLocation.Z += 10.f;
 
 			SDK::FVector direction = headLocation - cameraLocation;
@@ -389,34 +674,28 @@ void Hacks::Aimbot()
 
 void Hacks::DisableCameras()
 {
-	static bool cameraState = false;
-	static int cameraFrameCounter = 0;
-
 	if (!manager->pConfig->disableCameras.enabled)
 	{
-		if (cameraState)
+		if (g_disableCamerasState)
 		{
-			ForEachValidActor(manager->actorRegistry.GetCameras(), [](SDK::AActor* actor)
-			{
-				auto* camera = static_cast<SDK::ACameraBP_C*>(actor);
-				camera->Ignored_ = false;
-			});
-			cameraState = false;
-			cameraFrameCounter = 0;
+			RestoreTrackedCameraIgnoredStates();
+			g_disableCamerasState = false;
+			g_disableCamerasFrameCounter = 0;
 		}
 		return;
 	}
 
-	cameraFrameCounter++;
-	if (cameraState && cameraFrameCounter < 60)
+	g_disableCamerasFrameCounter++;
+	if (g_disableCamerasState && g_disableCamerasFrameCounter < 60)
 		return;
-	cameraFrameCounter = 0;
-	cameraState = true;
+	g_disableCamerasFrameCounter = 0;
+	g_disableCamerasState = true;
 	manager->actorRegistry.Refresh(true);
 
 	ForEachValidActor(manager->actorRegistry.GetCameras(), [](SDK::AActor* actor)
 	{
 		auto* camera = static_cast<SDK::ACameraBP_C*>(actor);
+		TrackCameraIgnoredStateIfNeeded(camera);
 		camera->Ignored_ = true;
 
 		if (camera->SpotPlayerComponent)
@@ -429,18 +708,23 @@ void Hacks::DisableCameras()
 
 void Hacks::SpeedHack()
 {
-	static bool speedState = false;
 	if (manager->pConfig->speed.enabled)
 	{
+		if (!CaptureCharacterMutationStateIfNeeded())
+			return;
+
 		Vars::CharacterClass->CharacterMovement->MaxWalkSpeed = manager->pConfig->speed.speed;
 		Vars::CharacterClass->CharacterMovement->MaxAcceleration = manager->pConfig->speed.speed;
-		speedState = true;
+		g_speedHackState = true;
 	}
-	else if (speedState)
+	else if (g_speedHackState)
 	{
-		Vars::CharacterClass->CharacterMovement->MaxWalkSpeed = 600.f;
-		Vars::CharacterClass->CharacterMovement->MaxAcceleration = 2048.f;
-		speedState = false;
+		if (g_characterMutationState.initialized && g_characterMutationState.movement == Vars::CharacterClass->CharacterMovement)
+		{
+			Vars::CharacterClass->CharacterMovement->MaxWalkSpeed = g_characterMutationState.maxWalkSpeed;
+			Vars::CharacterClass->CharacterMovement->MaxAcceleration = g_characterMutationState.maxAcceleration;
+		}
+		g_speedHackState = false;
 	}
 }
 
@@ -470,35 +754,33 @@ void Hacks::CashHack()
 
 void Hacks::Bhop()
 {
-	static bool bhopWasJumping = false;
-
 	if (!Vars::CharacterClass || !Vars::CharacterClass->CharacterMovement)
 		return;
 
 	if (!manager->pConfig->bhop.enabled || !IsKeyHeld(VK_SPACE))
 	{
-		if (bhopWasJumping || Vars::CharacterClass->bPressedJump)
+		if (g_bhopWasJumping || Vars::CharacterClass->bPressedJump)
 			Vars::CharacterClass->StopJumping();
 
-		bhopWasJumping = false;
+		g_bhopWasJumping = false;
 		return;
 	}
 
 	if (Vars::CharacterClass->Downed_ || Vars::CharacterClass->Vaulting_)
 	{
-		if (bhopWasJumping || Vars::CharacterClass->bPressedJump)
+		if (g_bhopWasJumping || Vars::CharacterClass->bPressedJump)
 			Vars::CharacterClass->StopJumping();
 
-		bhopWasJumping = false;
+		g_bhopWasJumping = false;
 		return;
 	}
 
 	if (Vars::CharacterClass->CharacterMovement->IsMovingOnGround() && Vars::CharacterClass->CanJump())
 	{
 		Vars::CharacterClass->Jump();
-		bhopWasJumping = true;
+		g_bhopWasJumping = true;
 	}
-	else if (bhopWasJumping || Vars::CharacterClass->bPressedJump)
+	else if (g_bhopWasJumping || Vars::CharacterClass->bPressedJump)
 	{
 		Vars::CharacterClass->StopJumping();
 	}
@@ -537,12 +819,14 @@ void Hacks::FlyHack()
 {
 	if (!Vars::MyController->PlayerCameraManager)
 		return;
-	static bool flyHackState = false;
 	if (manager->pConfig->flyHack.enabled)
 	{
+		if (!CaptureCharacterMutationStateIfNeeded())
+			return;
+
 		Vars::CharacterClass->CharacterMovement->Velocity = SDK::FVector{0, 0, 0};
-		Vars::CharacterClass->CharacterMovement->MaxFlySpeed = 600.f;
-		Vars::CharacterClass->CharacterMovement->MovementMode = SDK::EMovementMode::MOVE_Flying;
+		Vars::CharacterClass->CharacterMovement->MaxFlySpeed = 600.0f;
+		Vars::CharacterClass->CharacterMovement->SetMovementMode(SDK::EMovementMode::MOVE_Flying, 0);
 
 		SDK::FVector pos = { 0.f, 0.f, 0.f };
 		if (GetAsyncKeyState(VK_SPACE))
@@ -579,38 +863,55 @@ void Hacks::FlyHack()
 		}
 
 		Vars::CharacterClass->K2_TeleportTo(Vars::CharacterClass->K2_GetActorLocation() + pos + sum, Vars::CharacterClass->K2_GetActorRotation());
-		flyHackState = true;
+		g_flyHackState = true;
 	}
-	else if(!manager->pConfig->flyHack.enabled && flyHackState)
+	else if(!manager->pConfig->flyHack.enabled && g_flyHackState)
 	{
-		Vars::CharacterClass->CharacterMovement->MovementMode = SDK::EMovementMode::MOVE_Falling;
-		flyHackState = false;
+		if (!manager->pConfig->noclip.enabled &&
+			g_characterMutationState.initialized &&
+			g_characterMutationState.movement == Vars::CharacterClass->CharacterMovement)
+		{
+			Vars::CharacterClass->CharacterMovement->MaxFlySpeed = g_characterMutationState.maxFlySpeed;
+			Vars::CharacterClass->CharacterMovement->SetMovementMode(
+				g_characterMutationState.movementMode,
+				g_characterMutationState.customMovementMode);
+		}
+		g_flyHackState = false;
 	}
 }
 
 void Hacks::Noclip()
 {
-	static bool noclipState = false;
 	if (manager->pConfig->noclip.enabled)
 	{
-		Vars::CharacterClass->bActorEnableCollision = false;
+		if (!CaptureCharacterMutationStateIfNeeded())
+			return;
+
+		Vars::CharacterClass->SetActorEnableCollision(false);
 
 		if (!manager->pConfig->flyHack.enabled &&
 			Vars::CharacterClass->CharacterMovement->MovementMode != SDK::EMovementMode::MOVE_Flying)
 		{
-			Vars::CharacterClass->CharacterMovement->MovementMode = SDK::EMovementMode::MOVE_Flying;
+			Vars::CharacterClass->CharacterMovement->SetMovementMode(SDK::EMovementMode::MOVE_Flying, 0);
 		}
 
-		noclipState = true;
+		g_noclipState = true;
 	}
-	else if (noclipState)
+	else if (g_noclipState)
 	{
-		Vars::CharacterClass->bActorEnableCollision = true;
+		if (g_characterMutationState.initialized && g_characterMutationState.character == Vars::CharacterClass)
+			Vars::CharacterClass->SetActorEnableCollision(g_characterMutationState.actorEnableCollision);
 
-		if (!manager->pConfig->flyHack.enabled)
-			Vars::CharacterClass->CharacterMovement->MovementMode = SDK::EMovementMode::MOVE_Falling;
+		if (!manager->pConfig->flyHack.enabled &&
+			g_characterMutationState.initialized &&
+			g_characterMutationState.movement == Vars::CharacterClass->CharacterMovement)
+		{
+			Vars::CharacterClass->CharacterMovement->SetMovementMode(
+				g_characterMutationState.movementMode,
+				g_characterMutationState.customMovementMode);
+		}
 
-		noclipState = false;
+		g_noclipState = false;
 	}
 }
 
@@ -680,11 +981,9 @@ void Hacks::ThirdPerson()
 
 void Hacks::UnlimitedAmmo()
 {
-	static bool ammoState = false;
-
 	if (!manager->pConfig->unlimitedAmmo.enabled)
 	{
-		if (ammoState)
+		if (g_unlimitedAmmoState)
 		{
 			for (const auto& trackedWeaponEntry : g_trackedAmmoWeapons)
 			{
@@ -692,12 +991,12 @@ void Hacks::UnlimitedAmmo()
 			}
 
 			g_trackedAmmoWeapons.clear();
-			ammoState = false;
+			g_unlimitedAmmoState = false;
 		}
 		return;
 	}
 
-	ammoState = true;
+	g_unlimitedAmmoState = true;
 	if (!Vars::CharacterClass->HoldingGun)
 		return;
 
@@ -713,12 +1012,17 @@ void Hacks::GunMods()
 	bool multishot = manager->pConfig->multishot.enabled;
 
 	if (!rapidFire && !instantReload && !multishot)
+	{
+		RestoreTrackedWeaponModStates();
 		return;
+	}
 	if (!Vars::CharacterClass->HoldingGun)
 		return;
 
 	__try
 	{
+		TrackWeaponModStateIfNeeded(Vars::CharacterClass->HoldingGun, Vars::CharacterClass);
+
 		if (rapidFire)
 		{
 			Vars::CharacterClass->HoldingGun->CoolDownTime = 0.01f;
@@ -746,35 +1050,35 @@ void Hacks::JumpHack()
 	if (Vars::CharacterClass->CharacterMovement == nullptr)
 		return;
 
-	static bool jumpHackState = false;
 	if (manager->pConfig->jumpHack.enabled)
 	{
+		if (!CaptureCharacterMutationStateIfNeeded())
+			return;
+
 		Vars::CharacterClass->CharacterMovement->JumpZVelocity = static_cast<float>(manager->pConfig->jumpHack.value);
-		jumpHackState = true;
+		g_jumpHackState = true;
 	}
-	else if(jumpHackState)
+	else if(g_jumpHackState)
 	{
-		Vars::CharacterClass->CharacterMovement->JumpZVelocity = 300.f;
-		jumpHackState = false;
+		if (g_characterMutationState.initialized && g_characterMutationState.movement == Vars::CharacterClass->CharacterMovement)
+			Vars::CharacterClass->CharacterMovement->JumpZVelocity = g_characterMutationState.jumpZVelocity;
+		g_jumpHackState = false;
 	}
 }
 
 void Hacks::InstantLockpick()
 {
-	static SDK::ALock_C* trackedLock = nullptr;
-	static SDK::AActor* lastHoldingActor = nullptr;
-
 	if (!manager->pConfig->instantLockpick.enabled)
 	{
-		trackedLock = nullptr;
-		lastHoldingActor = nullptr;
+		g_trackedLock = nullptr;
+		g_lastHoldingActor = nullptr;
 		return;
 	}
 	if (!Vars::World || Vars::World->Levels.Num() == 0)
 		return;
 
 	SDK::AActor* holdingActor = Vars::CharacterClass ? Vars::CharacterClass->HoldingActor : nullptr;
-	const bool hadHeldLockpick = lastHoldingActor && lastHoldingActor->IsA(SDK::ALock_pick_C::StaticClass());
+	const bool hadHeldLockpick = g_lastHoldingActor && g_lastHoldingActor->IsA(SDK::ALock_pick_C::StaticClass());
 	const bool hasHeldLockpick = holdingActor && holdingActor->IsA(SDK::ALock_pick_C::StaticClass());
 
 	__try
@@ -783,11 +1087,11 @@ void Hacks::InstantLockpick()
 		{
 			auto* heldLockpick = static_cast<SDK::ALock_pick_C*>(holdingActor);
 			if (heldLockpick->Lock)
-				trackedLock = heldLockpick->Lock;
+				g_trackedLock = heldLockpick->Lock;
 
-			if (trackedLock && TryCompleteActiveLockpick(trackedLock))
+			if (g_trackedLock && TryCompleteActiveLockpick(g_trackedLock))
 			{
-				lastHoldingActor = holdingActor;
+				g_lastHoldingActor = holdingActor;
 				return;
 			}
 		}
@@ -796,38 +1100,38 @@ void Hacks::InstantLockpick()
 	{
 	}
 
-	if (trackedLock)
+	if (g_trackedLock)
 	{
-		if (TryCompleteActiveLockpick(trackedLock))
+		if (TryCompleteActiveLockpick(g_trackedLock))
 		{
-			lastHoldingActor = holdingActor;
+			g_lastHoldingActor = holdingActor;
 			return;
 		}
 
-		if (!IsLockpickInProgress(trackedLock))
-			trackedLock = nullptr;
+		if (!IsLockpickInProgress(g_trackedLock))
+			g_trackedLock = nullptr;
 	}
 
-	if (!trackedLock && hadHeldLockpick && !hasHeldLockpick)
+	if (!g_trackedLock && hadHeldLockpick && !hasHeldLockpick)
 	{
 		ForEachValidActor(manager->actorRegistry.GetLocks(), [&](SDK::AActor* actor)
 		{
-			if (!trackedLock)
+			if (!g_trackedLock)
 			{
 				auto* lock = static_cast<SDK::ALock_C*>(actor);
 				if (IsLockpickInProgress(lock))
-					trackedLock = lock;
+					g_trackedLock = lock;
 			}
 		});
 
-		if (trackedLock)
+		if (g_trackedLock)
 		{
-			if (TryCompleteActiveLockpick(trackedLock))
+			if (TryCompleteActiveLockpick(g_trackedLock))
 				return;
 		}
 	}
 
-	lastHoldingActor = holdingActor;
+	g_lastHoldingActor = holdingActor;
 }
 
 void Hacks::UnlockDoors()
@@ -953,43 +1257,43 @@ void Hacks::TieUpCivilians()
 
 void Hacks::Invulnerable()
 {
-	static bool invulnerableState = false;
-	static int invulnerableFrameCounter = 0;
-
 	if (!manager->pConfig->invulnerable.enabled)
 	{
-		if (invulnerableState)
+		if (g_invulnerableState)
 		{
-			Vars::CharacterClass->DamageImmunity = 0;
-			invulnerableState = false;
+			if (g_characterMutationState.initialized && g_characterMutationState.character == Vars::CharacterClass)
+			{
+				Vars::CharacterClass->DamageImmunity = g_characterMutationState.damageImmunity;
+				Vars::CharacterClass->DrillImmunityTime = g_characterMutationState.drillImmunityTime;
+			}
+			g_invulnerableState = false;
 		}
-		invulnerableFrameCounter = 0;
+		g_invulnerableFrameCounter = 0;
 		return;
 	}
 
-	invulnerableFrameCounter++;
-	if (invulnerableState && invulnerableFrameCounter < 300)
+	g_invulnerableFrameCounter++;
+	if (g_invulnerableState && g_invulnerableFrameCounter < 300)
 		return;
-	invulnerableFrameCounter = 0;
-	invulnerableState = true;
+	g_invulnerableFrameCounter = 0;
+	g_invulnerableState = true;
 
+	CaptureCharacterMutationStateIfNeeded();
 	Vars::CharacterClass->GiveImmunityLevel(99999.f);
 }
 
 void Hacks::MaxHealth()
 {
-	static int maxHealthFrameCounter = 0;
-
 	if (!manager->pConfig->maxHealth.enabled)
 	{
-		maxHealthFrameCounter = 0;
+		g_maxHealthFrameCounter = 0;
 		return;
 	}
 
-	maxHealthFrameCounter++;
-	if (maxHealthFrameCounter < 30)
+	g_maxHealthFrameCounter++;
+	if (g_maxHealthFrameCounter < 30)
 		return;
-	maxHealthFrameCounter = 0;
+	g_maxHealthFrameCounter = 0;
 
 	const int maxHealth = Vars::CharacterClass->MaxHealth;
 	if (maxHealth <= 0)
@@ -1001,18 +1305,16 @@ void Hacks::MaxHealth()
 
 void Hacks::MaxArmor()
 {
-	static int maxArmorFrameCounter = 0;
-
 	if (!manager->pConfig->maxArmor.enabled)
 	{
-		maxArmorFrameCounter = 0;
+		g_maxArmorFrameCounter = 0;
 		return;
 	}
 
-	maxArmorFrameCounter++;
-	if (maxArmorFrameCounter < 30)
+	g_maxArmorFrameCounter++;
+	if (g_maxArmorFrameCounter < 30)
 		return;
-	maxArmorFrameCounter = 0;
+	g_maxArmorFrameCounter = 0;
 
 	SDK::AArmor_Light_C* armor = GetEquippedArmorActor();
 	if (!armor)

@@ -117,31 +117,6 @@ namespace
 		}
 	}
 
-	void DestroyCameraProxyPrimitive(SDK::UStaticMeshComponent*& component)
-	{
-		if (!component)
-			return;
-
-		__try
-		{
-			if (SDK::UKismetSystemLibrary::IsValid(component))
-			{
-				component->SetRenderCustomDepth(false);
-				component->bRenderInDepthPass = false;
-				component->SetRenderInMainPass(false);
-				component->SetCollisionEnabled(SDK::ECollisionEnabled::NoCollision);
-
-				if (SDK::AActor* owner = component->GetOwner())
-					owner->K2_DestroyComponent(component);
-			}
-		}
-		__except (EXCEPTION_EXECUTE_HANDLER)
-		{
-		}
-
-		component = nullptr;
-	}
-
 	SDK::TArray<SDK::FWeightedBlendable>* GetBlendablesForOwner(Esp::GlowBlendableOwnerType ownerType, SDK::UObject* owner)
 	{
 		if (!owner)
@@ -208,126 +183,10 @@ namespace
 	}
 }
 
-SDK::UStaticMeshComponent* Esp::CreateCameraProxyMesh(SDK::ACameraBP_C* camera, SDK::UStaticMeshComponent* source, int stencilValue)
-{
-	if (!camera || !source)
-		return nullptr;
-
-	if (!SDK::UKismetSystemLibrary::IsValid(camera) || !SDK::UKismetSystemLibrary::IsValid(source))
-		return nullptr;
-
-	SDK::FTransform identity{};
-	identity.Rotation.X = 0.f;
-	identity.Rotation.Y = 0.f;
-	identity.Rotation.Z = 0.f;
-	identity.Rotation.W = 1.f;
-	identity.Translation.X = 0.f;
-	identity.Translation.Y = 0.f;
-	identity.Translation.Z = 0.f;
-	identity.Scale3D.X = 1.f;
-	identity.Scale3D.Y = 1.f;
-	identity.Scale3D.Z = 1.f;
-
-	auto* proxy = static_cast<SDK::UStaticMeshComponent*>(
-		camera->AddComponentByClass(
-			SDK::UStaticMeshComponent::StaticClass(),
-			true,
-			identity,
-			true
-		)
-	);
-
-	if (!proxy)
-		return nullptr;
-
-	proxy->SetStaticMesh(source->StaticMesh);
-
-	const int numMats = source->GetNumMaterials();
-	for (int i = 0; i < numMats; i++)
-	{
-		SDK::UMaterialInterface* mat = source->GetMaterial(i);
-		if (mat)
-			proxy->SetMaterial(i, mat);
-	}
-
-	proxy->SetRenderInMainPass(false);
-	proxy->bRenderInDepthPass = false;
-	proxy->SetRenderCustomDepth(true);
-	proxy->SetCustomDepthStencilValue(stencilValue);
-	proxy->SetCollisionEnabled(SDK::ECollisionEnabled::NoCollision);
-	proxy->SetCastShadow(false);
-	proxy->SetReceivesDecals(false);
-
-	camera->FinishAddComponent(proxy, true, identity);
-
-	static SDK::FName emptySocket{};
-	proxy->K2_AttachToComponent(
-		source,
-		emptySocket,
-		SDK::EAttachmentRule::SnapToTarget,
-		SDK::EAttachmentRule::SnapToTarget,
-		SDK::EAttachmentRule::SnapToTarget,
-		false
-	);
-
-	return proxy;
-}
-
-void Esp::EnsureCameraProxies(SDK::ACameraBP_C* camera, bool enabling, int stencilValue)
-{
-	if (!camera)
-		return;
-
-	const std::uintptr_t key = reinterpret_cast<std::uintptr_t>(camera);
-
-	if (!enabling)
-	{
-		auto it = cameraProxies.find(key);
-		if (it != cameraProxies.end())
-		{
-			DestroyCameraProxyPrimitive(it->second.head);
-			DestroyCameraProxyPrimitive(it->second.arm);
-			cameraProxies.erase(it);
-		}
-		return;
-	}
-
-	CameraProxyMeshes& proxies = cameraProxies[key];
-
-	if (!proxies.head || !SDK::UKismetSystemLibrary::IsValid(proxies.head))
-	{
-		if (camera->CameraHead && SDK::UKismetSystemLibrary::IsValid(camera->CameraHead))
-			proxies.head = CreateCameraProxyMesh(camera, camera->CameraHead, stencilValue);
-	}
-
-	if (!proxies.arm || !SDK::UKismetSystemLibrary::IsValid(proxies.arm))
-	{
-		if (camera->CameraArm && SDK::UKismetSystemLibrary::IsValid(camera->CameraArm))
-			proxies.arm = CreateCameraProxyMesh(camera, camera->CameraArm, stencilValue);
-	}
-
-	if (proxies.head && SDK::UKismetSystemLibrary::IsValid(proxies.head))
-		ApplyGlowToPrimitive(proxies.head, true, stencilValue);
-
-	if (proxies.arm && SDK::UKismetSystemLibrary::IsValid(proxies.arm))
-		ApplyGlowToPrimitive(proxies.arm, true, stencilValue);
-}
-
-void Esp::CleanupAllCameraProxies()
-{
-	for (auto& entry : cameraProxies)
-	{
-		DestroyCameraProxyPrimitive(entry.second.head);
-		DestroyCameraProxyPrimitive(entry.second.arm);
-	}
-	cameraProxies.clear();
-}
-
 void Esp::RefreshEspActorCache(bool forceRefresh, bool trackPolice, bool trackPlayers, bool trackCameras, bool trackRats)
 {
 	if (!trackPolice && !trackPlayers && !trackCameras && !trackRats)
 	{
-		CleanupAllCameraProxies();
 		cachedEspActors.clear();
 		cachedActorRegistryRevision = 0;
 		return;
@@ -335,9 +194,6 @@ void Esp::RefreshEspActorCache(bool forceRefresh, bool trackPolice, bool trackPl
 
 	if (!manager)
 		return;
-
-	if (!trackCameras)
-		CleanupAllCameraProxies();
 
 	const ActorRegistry& actorRegistry = manager->actorRegistry;
 	const std::uint64_t registryRevision = actorRegistry.GetRevision();
@@ -377,6 +233,15 @@ bool Esp::NeedsOverlayRender() const
 		(config.aimbot.enabled && config.aimbot.showFov) ||
 		config.esp.bulletTracersEnabled ||
 		HasAnyBoxOverlayEnabled(config);
+}
+
+void Esp::TrackGlowPrimitive(SDK::UPrimitiveComponent* component)
+{
+	if (!component)
+		return;
+
+	const std::uintptr_t componentKey = reinterpret_cast<std::uintptr_t>(component);
+	trackedGlowPrimitives[componentKey] = component;
 }
 
 void Esp::Tick()
@@ -513,6 +378,8 @@ void Esp::ApplyGlow()
 				bool enabling = IsPoliceEspActive(config) &&
 					config.esp.policeGlowEnabled &&
 					!(filterDormant && guard->Dead_);
+				TrackGlowPrimitive(guard->Mesh);
+				TrackGlowPrimitive(guard->Hat);
 				ApplyGlowToPrimitive(guard->Mesh, enabling, kGlowStencilValue);
 				ApplyGlowToPrimitive(guard->Hat, enabling, kGlowStencilValue);
 			}
@@ -523,6 +390,7 @@ void Esp::ApplyGlow()
 					config.esp.policeGlowEnabled &&
 					!(filterDormant && police->Dead_);
 				auto* character = static_cast<SDK::ACharacter*>(currActor);
+				TrackGlowPrimitive(character ? character->Mesh : nullptr);
 				ApplyGlowToPrimitive(
 					character ? character->Mesh : nullptr,
 					enabling,
@@ -534,10 +402,12 @@ void Esp::ApplyGlow()
 				bool enabling = IsCameraEspActive(config) &&
 					config.esp.cameraGlowEnabled &&
 					!(filterDormant && camera->Destroyed_);
+				TrackGlowPrimitive(camera->CameraViewCollision);
+				TrackGlowPrimitive(camera->CameraHead);
+				TrackGlowPrimitive(camera->CameraArm);
 				DisableGlowOnPrimitive(camera->CameraViewCollision);
-				DisableGlowOnPrimitive(camera->CameraHead);
-				DisableGlowOnPrimitive(camera->CameraArm);
-				EnsureCameraProxies(camera, enabling, kGlowStencilValue);
+				ApplyGlowToPrimitive(camera->CameraHead, enabling, kGlowStencilValue);
+				ApplyGlowToPrimitive(camera->CameraArm, enabling, kGlowStencilValue);
 			}
 			else if (cachedActor.type == TrackedActorType::Player)
 			{
@@ -546,6 +416,7 @@ void Esp::ApplyGlow()
 				bool enabling = IsPlayerEspActive(config) &&
 					config.esp.playerGlowEnabled &&
 					!isLocalPlayer;
+				TrackGlowPrimitive(character ? character->Mesh : nullptr);
 				ApplyGlowToPrimitive(
 					character ? character->Mesh : nullptr,
 					enabling,
@@ -557,6 +428,7 @@ void Esp::ApplyGlow()
 				bool enabling = IsRatEspActive(config) &&
 					config.esp.ratGlowEnabled &&
 					!(filterDormant && rat->Dead_);
+				TrackGlowPrimitive(rat ? rat->Mesh : nullptr);
 				ApplyGlowToPrimitive(
 					rat ? rat->Mesh : nullptr,
 					enabling,
@@ -698,6 +570,9 @@ void Esp::RestoreGlowColorOverride()
 void Esp::DisableAll()
 {
 	RestoreGlowColorOverride();
+	for (const auto& trackedPrimitiveEntry : trackedGlowPrimitives)
+		DisableGlowOnPrimitive(trackedPrimitiveEntry.second);
+
 	auto disableCharacterMeshes = [](const std::vector<SDK::AActor*>& actors)
 	{
 		for (SDK::AActor* actor : actors)
@@ -735,8 +610,6 @@ void Esp::DisableAll()
 		DisableGlowOnPrimitive(camera->CameraArm);
 	}
 
-	CleanupAllCameraProxies();
-
 	prevPoliceEsp = false;
 	prevPoliceGlow = false;
 	prevPlayerEsp = false;
@@ -748,8 +621,31 @@ void Esp::DisableAll()
 	prevFilterDormant = true;
 	cachedEspActors.clear();
 	cachedActorRegistryRevision = 0;
+	trackedGlowPrimitives.clear();
 	liveBulletPositions.clear();
 	bulletTracerSegments.clear();
+	glowOverrideLevel = nullptr;
+	hasLastAppliedGlowColor = false;
+}
+
+void Esp::OnWorldChanged()
+{
+	prevPoliceEsp = false;
+	prevPoliceGlow = false;
+	prevPlayerEsp = false;
+	prevPlayerGlow = false;
+	prevCameraEsp = false;
+	prevCameraGlow = false;
+	prevRatEsp = false;
+	prevRatGlow = false;
+	prevFilterDormant = true;
+	espFrameCounter = 0;
+	cachedEspActors.clear();
+	cachedActorRegistryRevision = 0;
+	trackedGlowPrimitives.clear();
+	liveBulletPositions.clear();
+	bulletTracerSegments.clear();
+	glowBlendableOverrides.clear();
 	glowOverrideLevel = nullptr;
 	hasLastAppliedGlowColor = false;
 }

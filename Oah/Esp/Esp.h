@@ -14,6 +14,7 @@ public:
 	void RenderOverlay();
 	bool NeedsOverlayRender() const;
 	void DisableAll();
+	void OnWorldChanged();
 
 	enum class TrackedActorType
 	{
@@ -52,26 +53,17 @@ public:
 		SDK::UMaterialInstanceDynamic* overrideObject{};
 	};
 
-	struct CameraProxyMeshes
-	{
-		SDK::UStaticMeshComponent* head{};
-		SDK::UStaticMeshComponent* arm{};
-	};
-
 private:
 	void RefreshEspActorCache(bool forceRefresh, bool trackPolice, bool trackPlayers, bool trackCameras, bool trackRats);
 	void ApplyGlow();
 	void ApplyGlowColorOverride();
 	void RestoreGlowColorOverride();
+	void TrackGlowPrimitive(SDK::UPrimitiveComponent* component);
 	void UpdateBulletTracers();
 	void RenderBulletTracers();
 	void RenderEntityBoxes();
 
 	void RenderFovCircle();
-
-	SDK::UStaticMeshComponent* CreateCameraProxyMesh(SDK::ACameraBP_C* camera, SDK::UStaticMeshComponent* source, int stencilValue);
-	void EnsureCameraProxies(SDK::ACameraBP_C* camera, bool enabling, int stencilValue);
-	void CleanupAllCameraProxies();
 
 	bool prevPoliceEsp{ false };
 	bool prevPoliceGlow{ false };
@@ -85,6 +77,7 @@ private:
 	int espFrameCounter{ 0 };
 	std::uint64_t cachedActorRegistryRevision{ 0 };
 	std::vector<CachedEspActor> cachedEspActors{};
+	std::unordered_map<std::uintptr_t, SDK::UPrimitiveComponent*> trackedGlowPrimitives{};
 	std::unordered_map<std::uintptr_t, SDK::FVector> liveBulletPositions{};
 	std::vector<BulletTracerSegment> bulletTracerSegments{};
 	std::vector<GlowBlendableOverride> glowBlendableOverrides{};
@@ -92,6 +85,4 @@ private:
 	bool hasLastAppliedGlowColor{ false };
 	SDK::FLinearColor lastAppliedGlowColor{};
 	SDK::FLinearColor lastAppliedGlowSecondaryColor{};
-
-	std::unordered_map<std::uintptr_t, CameraProxyMeshes> cameraProxies{};
 };

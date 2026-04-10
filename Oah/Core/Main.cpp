@@ -130,27 +130,24 @@ DWORD WINAPI MainThread(HMODULE hmodule)
 			manager->pConfig->esp.cameraEspEnabled = false;
 			manager->pConfig->esp.ratEspEnabled = false;
 			manager->pConfig->menu.enabled = false;
-			manager->pConfig->menu.injected = false;
 
-			for (int i = 0; i < 100; i++)
-			{
-				if (manager->pGui->cleanupDone || manager->pGui->activePresentCalls == 0)
-					break;
-				Sleep(10);
-			}
+			InterlockedExchange(&manager->pGui->unloadRequested, 1);
 
-			manager->pEsp->DisableAll();
-
-			for (int i = 0; i < 500 && !manager->pGui->cleanupDone; i++)
+			while (InterlockedCompareExchange(&manager->pGui->worldCleanupDone, 0, 0) == 0)
 				Sleep(10);
 
-			if (!manager->pGui->cleanupDone && manager->pGui->activePresentCalls == 0)
-				manager->pGui->Cleanup();
+			while (InterlockedCompareExchange(&manager->pGui->cleanupStarted, 0, 0) == 0)
+				Sleep(10);
+
+			while (InterlockedCompareExchange(&manager->pGui->cleanupDone, 0, 0) == 0)
+				Sleep(10);
+
+			while (InterlockedCompareExchange(&manager->pGui->activePresentCalls, 0, 0) > 0)
+				Sleep(10);
 
 			RenderHook::Shutdown();
 
-			for (int i = 0; i < 500 && manager->pGui->activePresentCalls > 0; i++)
-				Sleep(10);
+			manager->pConfig->menu.injected = false;
 
 			manager->ClearSDK();
 			manager.reset();

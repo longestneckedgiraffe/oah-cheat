@@ -1,15 +1,15 @@
 #include "RenderHook.h"
 
-#include "../Libs/MinHook/include/MinHook.h"
-
 namespace
 {
 	constexpr UINT kPresentVtableIndex = 8;
 
-	void* g_presentTarget = nullptr;
+	void** g_presentSlot = nullptr;
+	Present g_originalPresent = nullptr;
+	Present g_hookPresent = nullptr;
 	bool g_hookCreated = false;
+	bool g_hookEnabled = false;
 	bool g_hookInitialized = false;
-	bool g_ownsMinHook = false;
 
 	HWND CreateBootstrapWindow()
 	{
@@ -28,12 +28,13 @@ namespace
 			nullptr);
 	}
 
-	RenderHook::Status ResolvePresentTarget(void** target)
+	RenderHook::Status ResolvePresentSlot(void*** slot, Present* originalFunction)
 	{
-		if (!target)
+		if (!slot || !originalFunction)
 			return RenderHook::Status::InvalidArgument;
 
-		*target = nullptr;
+		*slot = nullptr;
+		*originalFunction = nullptr;
 
 		HWND window = CreateBootstrapWindow();
 		if (!window)
@@ -105,13 +106,31 @@ namespace
 			return RenderHook::Status::PresentNotFound;
 		}
 
-		*target = swapChainVtable[kPresentVtableIndex];
+		*slot = &swapChainVtable[kPresentVtableIndex];
+		*originalFunction = reinterpret_cast<Present>(swapChainVtable[kPresentVtableIndex]);
 
 		context->Release();
 		device->Release();
 		swapChain->Release();
 		DestroyWindow(window);
 		return RenderHook::Status::Success;
+	}
+
+	bool WritePresentSlot(Present function)
+	{
+		if (!g_presentSlot || !function)
+			return false;
+
+		DWORD oldProtect = 0;
+		if (!VirtualProtect(g_presentSlot, sizeof(void*), PAGE_EXECUTE_READWRITE, &oldProtect))
+			return false;
+
+		InterlockedExchangePointer(reinterpret_cast<PVOID volatile*>(g_presentSlot), reinterpret_cast<PVOID>(function));
+		FlushInstructionCache(GetCurrentProcess(), g_presentSlot, sizeof(void*));
+
+		DWORD restoreProtect = 0;
+		VirtualProtect(g_presentSlot, sizeof(void*), oldProtect, &restoreProtect);
+		return true;
 	}
 }
 
@@ -125,66 +144,50 @@ RenderHook::Status RenderHook::Initialize(Present hookFunction, Present* origina
 
 	*originalFunction = nullptr;
 
-	Status targetStatus = ResolvePresentTarget(&g_presentTarget);
-	if (targetStatus != Status::Success)
-		return targetStatus;
+	Status resolveStatus = ResolvePresentSlot(&g_presentSlot, &g_originalPresent);
+	if (resolveStatus != Status::Success)
+		return resolveStatus;
 
-	const MH_STATUS initStatus = MH_Initialize();
-	if (initStatus != MH_OK && initStatus != MH_ERROR_ALREADY_INITIALIZED)
+	g_hookPresent = hookFunction;
+	*originalFunction = g_originalPresent;
+
+	if (!WritePresentSlot(g_hookPresent))
 	{
-		g_presentTarget = nullptr;
-		return Status::MinHookInitializeFailed;
-	}
-
-	g_ownsMinHook = (initStatus == MH_OK);
-
-	if (MH_CreateHook(g_presentTarget, reinterpret_cast<LPVOID>(hookFunction), reinterpret_cast<LPVOID*>(originalFunction)) != MH_OK)
-	{
-		if (g_ownsMinHook)
-			MH_Uninitialize();
-
-		g_ownsMinHook = false;
-		g_presentTarget = nullptr;
-		return Status::MinHookCreateFailed;
+		g_presentSlot = nullptr;
+		g_originalPresent = nullptr;
+		g_hookPresent = nullptr;
+		return Status::VtablePatchFailed;
 	}
 
 	g_hookCreated = true;
-
-	if (MH_EnableHook(g_presentTarget) != MH_OK)
-	{
-		MH_RemoveHook(g_presentTarget);
-		g_hookCreated = false;
-
-		if (g_ownsMinHook)
-			MH_Uninitialize();
-
-		g_ownsMinHook = false;
-		g_presentTarget = nullptr;
-		return Status::MinHookEnableFailed;
-	}
-
+	g_hookEnabled = true;
 	g_hookInitialized = true;
 	return Status::Success;
 }
 
-void RenderHook::Shutdown()
+void RenderHook::Disable()
 {
-	if (!g_hookInitialized && !g_hookCreated && !g_presentTarget && !g_ownsMinHook)
+	if (!g_hookCreated || !g_hookEnabled || !g_originalPresent)
 		return;
 
-	if (g_hookCreated && g_presentTarget)
-	{
-		MH_DisableHook(g_presentTarget);
-		MH_RemoveHook(g_presentTarget);
-	}
+	if (WritePresentSlot(g_originalPresent))
+		g_hookEnabled = false;
+}
 
-	if (g_ownsMinHook)
-		MH_Uninitialize();
+void RenderHook::Shutdown()
+{
+	if (!g_hookInitialized && !g_hookCreated && !g_hookEnabled && !g_presentSlot)
+		return;
 
-	g_presentTarget = nullptr;
+	if (g_hookEnabled)
+		Disable();
+
+	g_presentSlot = nullptr;
+	g_originalPresent = nullptr;
+	g_hookPresent = nullptr;
 	g_hookCreated = false;
+	g_hookEnabled = false;
 	g_hookInitialized = false;
-	g_ownsMinHook = false;
 }
 
 const char* RenderHook::StatusToString(Status status)
@@ -205,12 +208,10 @@ const char* RenderHook::StatusToString(Status status)
 		return "CreateSwapChainFailed";
 	case Status::PresentNotFound:
 		return "PresentNotFound";
-	case Status::MinHookInitializeFailed:
-		return "MinHookInitializeFailed";
-	case Status::MinHookCreateFailed:
-		return "MinHookCreateFailed";
-	case Status::MinHookEnableFailed:
-		return "MinHookEnableFailed";
+	case Status::VtablePatchFailed:
+		return "VtablePatchFailed";
+	case Status::VtableRestoreFailed:
+		return "VtableRestoreFailed";
 	default:
 		return "UnknownStatus";
 	}

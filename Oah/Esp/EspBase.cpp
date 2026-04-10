@@ -13,8 +13,12 @@
 #include "../Libs/UEDump/SDK/PlayerCharacter_classes.hpp"
 #include "../Libs/UEDump/SDK/RatCharacter_classes.hpp"
 
+static bool TryGetSceneComponentBounds(SDK::USceneComponent* component, SDK::FVector& origin, SDK::FVector& extent);
+
 namespace
 {
+	static constexpr SDK::ETraceTypeQuery kVisibilityTraceChannel = SDK::ETraceTypeQuery::TraceTypeQuery1;
+
 	bool IsBulletTraceActor(SDK::AActor* actor)
 	{
 		return actor && actor->IsA(SDK::ABulletTrace_C::StaticClass());
@@ -45,42 +49,162 @@ namespace
 		return ImGui::ColorConvertFloat4ToU32(ImVec4(color[0], color[1], color[2], color[3]));
 	}
 
-	bool IsCameraHeadRecentlyRendered(SDK::ACameraBP_C* camera, float tolerance)
+	SDK::FVector GetCurrentViewLocation()
 	{
+		if (Vars::MyController && Vars::MyController->PlayerCameraManager)
+			return Vars::MyController->PlayerCameraManager->GetCameraLocation();
+		if (Vars::MyPawn)
+			return Vars::MyPawn->K2_GetActorLocation();
+		return {};
+	}
+
+	bool IsProjectedOnScreen(const SDK::FVector& world)
+	{
+		if (!Vars::MyController)
+			return false;
+
+		SDK::FVector2D screenPos{};
+		if (!Vars::MyController->ProjectWorldLocationToScreen(world, &screenPos, false))
+			return false;
+
+		const ImVec2 displaySize = ImGui::GetIO().DisplaySize;
 		return
-			camera &&
-			camera->CameraHead &&
-			SDK::UKismetSystemLibrary::IsValid(camera->CameraHead) &&
-			camera->CameraHead->WasRecentlyRendered(tolerance);
+			screenPos.X >= 0.0f &&
+			screenPos.Y >= 0.0f &&
+			screenPos.X <= displaySize.x &&
+			screenPos.Y <= displaySize.y;
 	}
 
-	bool IsCameraArmRecentlyRendered(SDK::ACameraBP_C* camera, float tolerance)
+	bool AppendCameraVisibilitySamplePoints(
+		SDK::USceneComponent* component,
+		std::array<SDK::FVector, 18>& samplePoints,
+		size_t& sampleCount)
 	{
-		return
-			camera &&
-			camera->CameraArm &&
-			SDK::UKismetSystemLibrary::IsValid(camera->CameraArm) &&
-			camera->CameraArm->WasRecentlyRendered(tolerance);
+		SDK::FVector origin{};
+		SDK::FVector extent{};
+		if (!TryGetSceneComponentBounds(component, origin, extent))
+			return false;
+
+		if (sampleCount < samplePoints.size())
+			samplePoints[sampleCount++] = origin;
+		const SDK::FVector offsets[8] = {
+			{ extent.X,  extent.Y,  extent.Z },
+			{ extent.X,  extent.Y, -extent.Z },
+			{ extent.X, -extent.Y,  extent.Z },
+			{ extent.X, -extent.Y, -extent.Z },
+			{-extent.X,  extent.Y,  extent.Z },
+			{-extent.X,  extent.Y, -extent.Z },
+			{-extent.X, -extent.Y,  extent.Z },
+			{-extent.X, -extent.Y, -extent.Z },
+		};
+
+		for (const SDK::FVector& offset : offsets)
+		{
+			if (sampleCount >= samplePoints.size())
+				break;
+			if (offset.X == 0.0f && offset.Y == 0.0f && offset.Z == 0.0f)
+				continue;
+			samplePoints[sampleCount++] = origin + offset;
+		}
+
+		return true;
 	}
 
-	bool IsCameraActorRecentlyRendered(SDK::ACameraBP_C* camera, float tolerance)
-	{
-		return camera && camera->WasRecentlyRendered(tolerance);
-	}
-
-	bool IsCameraVisibleForBoxes(const Config& config, SDK::ACameraBP_C* camera)
+	bool IsCameraTraceHit(SDK::ACameraBP_C* camera, const SDK::FHitResult& hit)
 	{
 		if (!camera)
 			return false;
 
-		static constexpr float kRecentRenderTolerance = 0.06f;
+		return
+			hit.Actor.Get() == camera ||
+			hit.Component.Get() == camera->CameraHead ||
+			hit.Component.Get() == camera->CameraArm;
+	}
 
-		const bool headRecent = IsCameraHeadRecentlyRendered(camera, kRecentRenderTolerance);
-		const bool armRecent = IsCameraArmRecentlyRendered(camera, kRecentRenderTolerance);
-		if (config.esp.cameraGlowEnabled)
-			return headRecent || armRecent;
+	bool IsCameraPointVisible(SDK::ACameraBP_C* camera, const SDK::FVector& targetPoint)
+	{
+		if (!Vars::World || !Vars::MyController)
+			return false;
 
-		return headRecent || armRecent || IsCameraActorRecentlyRendered(camera, kRecentRenderTolerance);
+		const SDK::FVector viewLocation = GetCurrentViewLocation();
+		const SDK::FVector delta = targetPoint - viewLocation;
+		const float distanceSq = delta.X * delta.X + delta.Y * delta.Y + delta.Z * delta.Z;
+		if (distanceSq <= 1.0f)
+			return true;
+
+		SDK::AActor* ignoredActorsBuffer[2]{};
+		SDK::TArray<SDK::AActor*> ignoredActors(ignoredActorsBuffer, 0, 2);
+		if (Vars::MyPawn)
+			ignoredActors.Add(Vars::MyPawn);
+		if (SDK::AActor* viewTarget = Vars::MyController->GetViewTarget(); viewTarget && viewTarget != Vars::MyPawn)
+			ignoredActors.Add(viewTarget);
+
+		SDK::FHitResult hit{};
+		const bool hasBlockingHit = SDK::UKismetSystemLibrary::LineTraceSingle(
+			Vars::World,
+			viewLocation,
+			targetPoint,
+			kVisibilityTraceChannel,
+			true,
+			ignoredActors,
+			SDK::EDrawDebugTrace::None,
+			&hit,
+			false,
+			SDK::FLinearColor{},
+			SDK::FLinearColor{},
+			0.0f);
+
+		return !hasBlockingHit || IsCameraTraceHit(camera, hit);
+	}
+
+	bool IsCameraProjectedOnScreen(SDK::ACameraBP_C* camera)
+	{
+		if (!camera)
+			return false;
+
+		std::array<SDK::FVector, 18> samplePoints{};
+		size_t sampleCount = 0;
+		bool foundComponent = false;
+
+		foundComponent |= AppendCameraVisibilitySamplePoints(camera->CameraHead, samplePoints, sampleCount);
+		foundComponent |= AppendCameraVisibilitySamplePoints(camera->CameraArm, samplePoints, sampleCount);
+
+		for (size_t i = 0; i < sampleCount; ++i)
+		{
+			if (IsProjectedOnScreen(samplePoints[i]))
+				return true;
+		}
+
+		if (!foundComponent)
+			return IsProjectedOnScreen(camera->K2_GetActorLocation());
+
+		return false;
+	}
+
+	bool IsCameraVisibleForBoxes(const Config&, SDK::ACameraBP_C* camera)
+	{
+		if (!camera || !Vars::MyController)
+			return false;
+
+		std::array<SDK::FVector, 18> samplePoints{};
+		size_t sampleCount = 0;
+		bool foundComponent = false;
+
+		foundComponent |= AppendCameraVisibilitySamplePoints(camera->CameraHead, samplePoints, sampleCount);
+		foundComponent |= AppendCameraVisibilitySamplePoints(camera->CameraArm, samplePoints, sampleCount);
+
+		if (!foundComponent)
+			return IsProjectedOnScreen(camera->K2_GetActorLocation()) && IsCameraPointVisible(camera, camera->K2_GetActorLocation());
+
+		for (size_t i = 0; i < sampleCount; ++i)
+		{
+			if (!IsProjectedOnScreen(samplePoints[i]))
+				continue;
+			if (IsCameraPointVisible(camera, samplePoints[i]))
+				return true;
+		}
+
+		return false;
 	}
 
 	ImU32 GetBoxColor(const Config& config, SDK::APlayerController* controller, SDK::AActor* actor, const SDK::FVector& viewPoint)
