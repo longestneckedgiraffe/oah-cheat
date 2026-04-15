@@ -573,7 +573,7 @@ void Hacks::DisableAll()
 
 		RestoreCharacterMutationState();
 	}
-	__except (GetExceptionCode() == EXCEPTION_ACCESS_VIOLATION)
+	__except (EXCEPTION_EXECUTE_HANDLER)
 	{
 	}
 }

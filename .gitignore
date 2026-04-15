@@ -397,4 +397,8 @@ FodyWeavers.xsd
 # JetBrains Rider
 *.sln.iml
 
+
+# Claude Code
+Oah/.claude/
+
 build

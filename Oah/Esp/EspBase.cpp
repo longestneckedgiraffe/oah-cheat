@@ -410,6 +410,14 @@ static bool GetVisualBounds(const Esp::CachedEspActor& cachedActor, SDK::FVector
 	return extent.X > 0.0f || extent.Y > 0.0f || extent.Z > 0.0f;
 }
 
+static constexpr float kOutlineThickness = 1.0f;
+
+static ImU32 GetOutlineColor(ImU32 fillColor)
+{
+	const float alpha = static_cast<float>((fillColor >> IM_COL32_A_SHIFT) & 0xFF) / 255.0f;
+	return IM_COL32(0, 0, 0, static_cast<int>(alpha * 200.0f));
+}
+
 static void Draw3DBox(const std::array<ImVec2, 8>& screenCorners, ImDrawList* drawList, ImU32 color)
 {
 	static constexpr int edges[12][2] = {
@@ -418,6 +426,9 @@ static void Draw3DBox(const std::array<ImVec2, 8>& screenCorners, ImDrawList* dr
 		{0,4},{1,5},{2,6},{3,7},
 	};
 
+	const ImU32 outlineColor = GetOutlineColor(color);
+	for (const auto& edge : edges)
+		drawList->AddLine(screenCorners[edge[0]], screenCorners[edge[1]], outlineColor, 1.0f + kOutlineThickness);
 	for (const auto& edge : edges)
 		drawList->AddLine(screenCorners[edge[0]], screenCorners[edge[1]], color, 1.0f);
 }
@@ -509,6 +520,8 @@ void Esp::RenderBulletTracers()
 	const float lifetime = kBulletTracerLifetime;
 	auto* drawList = ImGui::GetBackgroundDrawList();
 
+	static constexpr float kTracerThickness = 2.0f;
+
 	for (const BulletTracerSegment& segment : bulletTracerSegments)
 	{
 		float age = now - segment.createdAt;
@@ -522,7 +535,9 @@ void Esp::RenderBulletTracers()
 
 		float alpha = 1.0f - (age / lifetime);
 		ImU32 color = IM_COL32(255, 255, 255, static_cast<int>(alpha * 255.0f));
-		drawList->AddLine(startScreen, endScreen, color, 1.0f);
+		ImU32 outlineColor = IM_COL32(0, 0, 0, static_cast<int>(alpha * 200.0f));
+		drawList->AddLine(startScreen, endScreen, outlineColor, kTracerThickness + kOutlineThickness);
+		drawList->AddLine(startScreen, endScreen, color, kTracerThickness);
 	}
 }
 
@@ -645,7 +660,10 @@ void Esp::RenderEntityBoxes()
 
 		const ImU32 boxColor = GetBoxColor(config, Vars::MyController, currActor, cameraLocation);
 		if (draw2D && (has2DRect || hasProjectedBounds))
+		{
+			drawList->AddRect(minPoint, maxPoint, GetOutlineColor(boxColor), 0.0f, 0, 1.0f + kOutlineThickness);
 			drawList->AddRect(minPoint, maxPoint, boxColor, 0.0f, 0, 1.0f);
+		}
 		if (draw3D && hasProjectedBounds)
 			Draw3DBox(screenCorners, drawList, boxColor);
 	}
@@ -667,5 +685,6 @@ void Esp::RenderFovCircle()
 		/ tanf(gameFov * 0.5f * (3.14159265f / 180.0f))
 		* (displaySize.y * 0.5f);
 
+	ImGui::GetBackgroundDrawList()->AddCircle(center, radius, IM_COL32(0, 0, 0, 120), 64, 1.0f + kOutlineThickness);
 	ImGui::GetBackgroundDrawList()->AddCircle(center, radius, IM_COL32(255, 255, 255, 150), 64, 1.0f);
 }

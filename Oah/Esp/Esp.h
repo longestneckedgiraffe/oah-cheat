@@ -56,7 +56,7 @@ public:
 private:
 	void RefreshEspActorCache(bool forceRefresh, bool trackPolice, bool trackPlayers, bool trackCameras, bool trackRats);
 	void ApplyGlow();
-	void ApplyGlowColorOverride();
+	void ApplyGlowColorOverride(bool shouldScan);
 	void RestoreGlowColorOverride();
 	void TrackGlowPrimitive(SDK::UPrimitiveComponent* component);
 	void UpdateBulletTracers();

@@ -308,11 +308,6 @@ void Esp::Tick()
 	else
 		RefreshEspActorCache(false, false, false, false, false);
 
-	if (anyGlowEnabled)
-		ApplyGlowColorOverride();
-	else
-		RestoreGlowColorOverride();
-
 	bool shouldRun = false;
 	if (stateChanged)
 	{
@@ -328,6 +323,11 @@ void Esp::Tick()
 			espFrameCounter = 0;
 		}
 	}
+
+	if (anyGlowEnabled)
+		ApplyGlowColorOverride(shouldRun);
+	else
+		RestoreGlowColorOverride();
 
 	if (!shouldRun)
 		return;
@@ -444,7 +444,7 @@ void Esp::ApplyGlow()
 	}
 }
 
-void Esp::ApplyGlowColorOverride()
+void Esp::ApplyGlowColorOverride(bool shouldScan)
 {
 	if (!Vars::World || Vars::World->Levels.Num() == 0)
 		return;
@@ -476,6 +476,9 @@ void Esp::ApplyGlowColorOverride()
 
 	for (const GlowBlendableOverride& overrideEntry : glowBlendableOverrides)
 	{
+		if (!overrideEntry.owner || !SDK::UKismetSystemLibrary::IsValid(static_cast<SDK::UObject*>(overrideEntry.owner)))
+			continue;
+
 		SDK::TArray<SDK::FWeightedBlendable>* blendables = GetBlendablesForOwner(overrideEntry.ownerType, overrideEntry.owner);
 		if (!blendables)
 			continue;
@@ -495,6 +498,9 @@ void Esp::ApplyGlowColorOverride()
 
 	glowBlendableOverrides.swap(activeOverrides);
 	if (!glowBlendableOverrides.empty())
+		return;
+
+	if (!shouldScan)
 		return;
 
 	for (int i = 0; i < currentLevel->Actors.Num(); i++)
@@ -550,6 +556,9 @@ void Esp::RestoreGlowColorOverride()
 	{
 		for (const GlowBlendableOverride& overrideEntry : glowBlendableOverrides)
 		{
+			if (!overrideEntry.owner || !SDK::UKismetSystemLibrary::IsValid(static_cast<SDK::UObject*>(overrideEntry.owner)))
+				continue;
+
 			SDK::TArray<SDK::FWeightedBlendable>* blendables = GetBlendablesForOwner(overrideEntry.ownerType, overrideEntry.owner);
 			if (!blendables)
 				continue;
@@ -633,6 +642,7 @@ void Esp::DisableAll()
 
 void Esp::OnWorldChanged()
 {
+	RestoreGlowColorOverride();
 	prevPoliceEsp = false;
 	prevPoliceGlow = false;
 	prevPlayerEsp = false;
@@ -648,7 +658,4 @@ void Esp::OnWorldChanged()
 	trackedGlowPrimitives.clear();
 	liveBulletPositions.clear();
 	bulletTracerSegments.clear();
-	glowBlendableOverrides.clear();
-	glowOverrideLevel = nullptr;
-	hasLastAppliedGlowColor = false;
 }
