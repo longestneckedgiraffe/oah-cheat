@@ -33,7 +33,7 @@ namespace
 {
 	bool ShouldRestrictAimbotToVisibleTargets(const Config& config)
 	{
-		return config.esp.visibilityCheckEnabled;
+		return config.aimbot.visibleOnly;
 	}
 
 	template <typename TFunc>
@@ -673,18 +673,33 @@ void Hacks::Aimbot()
 	if (!bestTarget)
 		return;
 
-	SDK::FVector direction = bestHeadLocation - cameraLocation;
-	float horizontalDist = sqrtf(direction.X * direction.X + direction.Y * direction.Y);
-	float yaw = atan2f(direction.Y, direction.X) * (180.0f / 3.14159265f);
-	float pitch = atan2f(direction.Z, horizontalDist) * (180.0f / 3.14159265f);
+	const SDK::FVector direction = bestHeadLocation - cameraLocation;
+	const float horizontalDist = sqrtf(direction.X * direction.X + direction.Y * direction.Y);
+	const float desiredYaw = atan2f(direction.Y, direction.X) * (180.0f / 3.14159265f);
+	const float desiredPitch = atan2f(direction.Z, horizontalDist) * (180.0f / 3.14159265f);
 
-	SDK::FRotator currentRotation = Vars::MyController->GetControlRotation();
-	SDK::FRotator newRotation;
-	newRotation.Pitch = pitch;
-	newRotation.Yaw = yaw;
-	newRotation.Roll = currentRotation.Roll;
+	const SDK::FRotator currentRotation = Vars::MyController->GetControlRotation();
 
-	Vars::MyController->SetControlRotation(newRotation);
+	auto NormalizeAngleDelta = [](float angle) -> float
+	{
+		angle = fmodf(angle + 180.0f, 360.0f);
+		if (angle < 0.0f)
+			angle += 360.0f;
+		return angle - 180.0f;
+	};
+
+	const float deltaYaw = NormalizeAngleDelta(desiredYaw - currentRotation.Yaw);
+	const float deltaPitch = NormalizeAngleDelta(desiredPitch - currentRotation.Pitch);
+
+	float yawScale = Vars::MyController->InputYawScale;
+	float pitchScale = Vars::MyController->InputPitchScale;
+	if (fabsf(yawScale) < 1e-6f)
+		yawScale = 1.0f;
+	if (fabsf(pitchScale) < 1e-6f)
+		pitchScale = 1.0f;
+
+	Vars::MyController->AddYawInput(deltaYaw / yawScale);
+	Vars::MyController->AddPitchInput(deltaPitch / pitchScale);
 }
 
 void Hacks::DisableCameras()

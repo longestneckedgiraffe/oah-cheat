@@ -101,22 +101,25 @@ void Gui::RenderMainWindow()
 						ImGui::TextUnformatted("Field of View");
 						ImGui::SetNextItemWidth(-FLT_MIN);
 						ImGui::SliderFloat("##AimbotFov", &manager->pConfig->aimbot.fov, 5.0f, 60.0f, "%.0f deg");
-						ImGui::Checkbox("Draw FOV Circle", &manager->pConfig->aimbot.showFov);
+						ImGui::Checkbox("Visible only", &manager->pConfig->aimbot.visibleOnly);
+						ImGui::Checkbox("Draw FOV circle", &manager->pConfig->aimbot.showFov);
 						DrawToggleKeybindText("Hold ", VK_XBUTTON1);
 					}
 
 					ImGui::Separator();
 					ImGui::Checkbox("Invulnerable", &manager->pConfig->invulnerable.enabled);
-					ImGui::Checkbox("Max Health", &manager->pConfig->maxHealth.enabled);
-					ImGui::Checkbox("Max Armor", &manager->pConfig->maxArmor.enabled);
+					ImGui::Checkbox("Max health", &manager->pConfig->maxHealth.enabled);
+					ImGui::Checkbox("Max armor", &manager->pConfig->maxArmor.enabled);
 					ImGui::EndChild();
 
 					ImGui::TableNextColumn();
 					ImGui::BeginChild("##combatRight", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding);
-					ImGui::Checkbox("Unlimited Ammo", &manager->pConfig->unlimitedAmmo.enabled);
-					ImGui::Checkbox("Rapid Fire", &manager->pConfig->rapidFire.enabled);
-					ImGui::Checkbox("Instant Reload", &manager->pConfig->instantReload.enabled);
+					ImGui::Checkbox("Unlimited ammo", &manager->pConfig->unlimitedAmmo.enabled);
+					ImGui::Checkbox("Rapid fire", &manager->pConfig->rapidFire.enabled);
+					ImGui::Checkbox("Instant reload", &manager->pConfig->instantReload.enabled);
 					ImGui::Checkbox("Multishot", &manager->pConfig->multishot.enabled);
+					ImGui::Separator();
+					ImGui::Checkbox("Render tracers", &manager->pConfig->esp.bulletTracersEnabled);
 					ImGui::EndChild();
 
 					ImGui::EndTable();
@@ -195,16 +198,14 @@ void Gui::RenderMainWindow()
 
 					ImGui::TableNextColumn();
 					ImGui::BeginChild("##visualsRight", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding);
-					ImGui::Checkbox("Bullet Tracers", &manager->pConfig->esp.bulletTracersEnabled);
-					ImGui::Separator();
-					ImGui::Checkbox("Visibility Check", &manager->pConfig->esp.visibilityCheckEnabled);
+					ImGui::Checkbox("Visibility check", &manager->pConfig->esp.visibilityCheckEnabled);
 					ImGui::ColorEdit4("Default Box", manager->pConfig->esp.defaultBoxColor);
 					ImGui::ColorEdit4("Hidden Box", manager->pConfig->esp.hiddenBoxColor);
 					ImGui::ColorEdit4("Visible Box", manager->pConfig->esp.visibleBoxColor);
 					ImGui::Dummy(ImVec2(0.0f, 8.0f));
 					ImGui::ColorEdit4("Glow Color", manager->pConfig->esp.glowColor);
 					ImGui::Separator();
-					ImGui::Checkbox("Dormant", &manager->pConfig->settings.filterDormant);
+					ImGui::Checkbox("Filter dead", &manager->pConfig->settings.filterDormant);
 					ImGui::EndChild();
 
 					ImGui::EndTable();
@@ -254,7 +255,7 @@ void Gui::RenderMainWindow()
 						DrawToggleKeybindText("Toggle with ", VK_XBUTTON2);
 
 					ImGui::Separator();
-					ImGui::Checkbox("Third Person", &manager->pConfig->thirdPerson.enabled);
+					ImGui::Checkbox("Third person", &manager->pConfig->thirdPerson.enabled);
 					if (manager->pConfig->thirdPerson.enabled)
 					{
 						ImGui::TextUnformatted("Back");
@@ -286,8 +287,8 @@ void Gui::RenderMainWindow()
 
 					ImGui::TableNextColumn();
 					ImGui::BeginChild("##worldLeft", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding);
-					ImGui::Checkbox("Disable Cameras", &manager->pConfig->disableCameras.enabled);
-					ImGui::Checkbox("Instant Lockpick", &manager->pConfig->instantLockpick.enabled);
+					ImGui::Checkbox("Disable cameras", &manager->pConfig->disableCameras.enabled);
+					ImGui::Checkbox("Instant lockpick", &manager->pConfig->instantLockpick.enabled);
 
 					ImGui::Separator();
 					if (ImGui::Button("Unlock Doors", ImVec2(-FLT_MIN, 0.0f)))

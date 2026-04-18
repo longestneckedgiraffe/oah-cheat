@@ -148,6 +148,7 @@ public:
 		bool enabled{ false };
 		float fov{ 30.f };
 		bool showFov{ true };
+		bool visibleOnly{ false };
 	} aimbot;
 
 	struct DebugEsp

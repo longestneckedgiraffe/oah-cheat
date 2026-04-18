@@ -157,30 +157,6 @@ namespace
 		return !hasBlockingHit || IsCameraTraceHit(camera, hit);
 	}
 
-	bool IsCameraProjectedOnScreen(SDK::ACameraBP_C* camera)
-	{
-		if (!camera)
-			return false;
-
-		std::array<SDK::FVector, 18> samplePoints{};
-		size_t sampleCount = 0;
-		bool foundComponent = false;
-
-		foundComponent |= AppendCameraVisibilitySamplePoints(camera->CameraHead, samplePoints, sampleCount);
-		foundComponent |= AppendCameraVisibilitySamplePoints(camera->CameraArm, samplePoints, sampleCount);
-
-		for (size_t i = 0; i < sampleCount; ++i)
-		{
-			if (IsProjectedOnScreen(samplePoints[i]))
-				return true;
-		}
-
-		if (!foundComponent)
-			return IsProjectedOnScreen(camera->K2_GetActorLocation());
-
-		return false;
-	}
-
 	bool IsCameraVisibleForBoxes(const Config&, SDK::ACameraBP_C* camera)
 	{
 		if (!camera || !Vars::MyController)
@@ -686,8 +662,9 @@ void Esp::RenderEntityBoxes()
 				const ImVec2 textPos = { centerX - textSize.x * 0.5f, minPoint.y - textSize.y - 2.0f };
 				const ImVec2 shadowPos = { textPos.x + 1.0f, textPos.y + 1.0f };
 				const ImU32 shadowColor = IM_COL32(0, 0, 0, 200);
+				const ImU32 nameColor = IM_COL32(255, 255, 255, 255);
 				drawList->AddText(nameFont, kNameFontSize, shadowPos, shadowColor, actorName.c_str());
-				drawList->AddText(nameFont, kNameFontSize, textPos, boxColor, actorName.c_str());
+				drawList->AddText(nameFont, kNameFontSize, textPos, nameColor, actorName.c_str());
 			}
 		}
 	}
