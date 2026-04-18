@@ -1,5 +1,8 @@
 #include "Manager.h"
 
+#include <cstring>
+#include <iostream>
+
 Manager::Manager() noexcept :
 	pGui(std::make_unique<Gui>()),
 	pConfig(std::make_unique<Config>()),
@@ -20,9 +23,19 @@ void Manager::ClearSDK()
 
 bool Manager::UpdateSDK()
 {
+	auto reportStatus = [this](const char* status)
+	{
+		if (!lastSdkStatus || std::strcmp(lastSdkStatus, status) != 0)
+		{
+			lastSdkStatus = status;
+			std::cout << "[SDK] " << status << std::endl;
+		}
+	};
+
 	Vars::World = SDK::UWorld::GetWorld();
 	if (Fns::IsNullPointer(Vars::World))
 	{
+		reportStatus("Not ready: World null");
 		ClearSDK();
 		return false;
 	}
@@ -32,18 +45,21 @@ bool Manager::UpdateSDK()
 	{
 		if (Fns::IsNullPointer(Vars::World->OwningGameInstance))
 		{
+			reportStatus("Not ready: OwningGameInstance null");
 			ClearSDK();
 			return false;
 		}
 		if (Vars::World->OwningGameInstance->LocalPlayers.Num() == 0 ||
 			Fns::IsNullPointer(Vars::World->OwningGameInstance->LocalPlayers[0]))
 		{
+			reportStatus("Not ready: LocalPlayers empty or null");
 			ClearSDK();
 			return false;
 		}
 		Vars::MyController = Vars::World->OwningGameInstance->LocalPlayers[0]->PlayerController;
 		if (Fns::IsNullPointer(Vars::MyController))
 		{
+			reportStatus("Not ready: PlayerController null");
 			ClearSDK();
 			return false;
 		}
@@ -52,6 +68,7 @@ bool Manager::UpdateSDK()
 	{
 		if (Fns::IsNullPointer(Vars::World->GameState))
 		{
+			reportStatus("Not ready: GameState null");
 			ClearSDK();
 			return false;
 		}
@@ -62,12 +79,14 @@ bool Manager::UpdateSDK()
 		Vars::MyPawn = Vars::MyController->AcknowledgedPawn;
 		if (Vars::MyPawn == nullptr)
 		{
+			reportStatus("Not ready: AcknowledgedPawn null");
 			ClearSDK();
 			return false;
 		}
 
 		if (!Vars::MyPawn->IsA(SDK::APlayerCharacter_C::StaticClass()))
 		{
+			reportStatus("Not ready: Pawn is not APlayerCharacter_C");
 			ClearSDK();
 			return false;
 		}
@@ -75,6 +94,7 @@ bool Manager::UpdateSDK()
 		Vars::CharacterClass = static_cast<SDK::APlayerCharacter_C*>(Vars::MyPawn);
 	}
 
+	reportStatus("Ready");
 	actorRegistry.Refresh();
 	return true;
 }

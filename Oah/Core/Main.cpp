@@ -14,7 +14,6 @@ std::unique_ptr<Manager> manager;
 
 DWORD WINAPI MainThread(HMODULE hmodule)
 {
-	bool keepConsoleOpen = false;
 	const bool consoleCreated = AllocConsole() != FALSE;
 	FILE* consoleFile = nullptr;
 	if (consoleCreated)
@@ -40,30 +39,13 @@ DWORD WINAPI MainThread(HMODULE hmodule)
 		std::cout << "[" << step << "] " << RenderHook::StatusToString(status)
 			<< " (" << static_cast<int>(status) << ")" << std::endl;
 	};
-	auto closeConsoleIfNeeded = [&](bool forceClose)
-	{
-		if (!forceClose || keepConsoleOpen || Vars::Debug)
-			return;
 
-		if (consoleFile)
-		{
-			fclose(consoleFile);
-			consoleFile = nullptr;
-		}
-
-		if (GetConsoleWindow())
-			FreeConsole();
-	};
-
-	logStep("Console", consoleCreated ? "Allocated" : "Allocation failed");
-	if (Vars::Debug)
-		keepConsoleOpen = true;
+	logStep("Console", consoleCreated ? "Allocated (persistent across build modes)" : "Allocation failed");
 	logStep("Loader", "Starting initialization");
 
 	manager = std::make_unique<Manager>();
 	if (!manager || !manager->pGui || !manager->pConfig || !manager->pHacks || !manager->pEsp)
 	{
-		keepConsoleOpen = true;
 		logStep("Manager", "Failed to construct core objects");
 		return TRUE;
 	}
@@ -91,16 +73,11 @@ DWORD WINAPI MainThread(HMODULE hmodule)
 		{
 			if (initAttempts == 1 || initAttempts % 200 == 0)
 				logStatus("RenderHook::Initialize", initStatus);
-			if (initAttempts > 200)
-				keepConsoleOpen = true;
 			Sleep(10);
 		}
 	}
 
-	logStep("Loader", keepConsoleOpen ? "Initialization complete; console will remain open" : "Initialization complete");
-	if (!keepConsoleOpen)
-		Sleep(1000);
-	closeConsoleIfNeeded(true);
+	logStep("Loader", "Initialization complete; console remains open until unload");
 
 	while (manager->pConfig->menu.injected)
 	{

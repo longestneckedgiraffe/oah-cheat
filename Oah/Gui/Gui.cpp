@@ -1,4 +1,5 @@
 #include <filesystem>
+#include <iostream>
 #include <utility>
 #include "../Core/Manager.h"
 #include "../Core/RenderHook.h"
@@ -241,8 +242,13 @@ HRESULT __stdcall Gui::HkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, 
 		LONG_PTR previousWndProc = SetWindowLongPtr(outputWindow, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(WndProc));
 		if (previousWndProc == 0 && GetLastError() != ERROR_SUCCESS)
 		{
+			std::cout << "[WndProc] Install failed on HWND=0x" << std::hex << reinterpret_cast<std::uintptr_t>(outputWindow)
+				<< " (GLE=" << std::dec << GetLastError() << ")" << std::endl;
 			return finishPresent(callOriginalPresent());
 		}
+
+		std::cout << "[WndProc] Installed on HWND=0x" << std::hex << reinterpret_cast<std::uintptr_t>(outputWindow)
+			<< " (original=0x" << static_cast<std::uintptr_t>(previousWndProc) << ")" << std::dec << std::endl;
 
 		manager->pGui->window = outputWindow;
 		manager->pGui->pDevice = std::move(device);
@@ -305,7 +311,16 @@ void Gui::Cleanup()
 		SetLastError(ERROR_SUCCESS);
 		const LONG_PTR restoreResult = SetWindowLongPtr(window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(oWndProc));
 		if (restoreResult != 0 || GetLastError() == ERROR_SUCCESS)
+		{
+			std::cout << "[WndProc] Restored on HWND=0x" << std::hex << reinterpret_cast<std::uintptr_t>(window)
+				<< std::dec << std::endl;
 			oWndProc = nullptr;
+		}
+		else
+		{
+			std::cout << "[WndProc] Restore failed on HWND=0x" << std::hex << reinterpret_cast<std::uintptr_t>(window)
+				<< " (GLE=" << std::dec << GetLastError() << ")" << std::endl;
+		}
 	}
 
 	if (ImGui::GetCurrentContext())

@@ -29,6 +29,9 @@ public:
 	std::unique_ptr<Hacks>  pHacks;
 	std::unique_ptr<Esp>    pEsp;
 	ActorRegistry actorRegistry{};
+
+private:
+	const char* lastSdkStatus = nullptr;
 };
 
 extern std::unique_ptr<Manager> manager;

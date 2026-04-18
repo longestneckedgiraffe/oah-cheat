@@ -1,6 +1,9 @@
 #include "../Core/Manager.h"
 #include "Esp.h"
 
+#include <cstdio>
+#include <iostream>
+#include <string>
 #include <vector>
 
 #include "../Libs/UEDump/SDK/CameraBP_classes.hpp"
@@ -13,6 +16,42 @@
 namespace
 {
 	static constexpr int kGlowStencilValue = 0;
+
+	void GlowDebugLog(const std::string& message)
+	{
+		std::cout << "[Glow] " << message << std::endl;
+	}
+
+	std::string FormatLinearColor(const SDK::FLinearColor& color)
+	{
+		char buffer[96];
+		std::snprintf(buffer, sizeof(buffer), "(R=%.3f G=%.3f B=%.3f A=%.3f)",
+			color.R, color.G, color.B, color.A);
+		return buffer;
+	}
+
+	bool SafeIsValid(SDK::UObject* object)
+	{
+		if (!object)
+			return false;
+		__try
+		{
+			return SDK::UKismetSystemLibrary::IsValid(object);
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			return false;
+		}
+	}
+
+	std::string SafeObjectName(SDK::UObject* object)
+	{
+		if (!object)
+			return "<null>";
+		if (!SafeIsValid(object))
+			return "<invalid>";
+		return object->GetName();
+	}
 
 	void AppendTrackedActors(
 		std::vector<Esp::CachedEspActor>& destination,
@@ -154,19 +193,31 @@ namespace
 		const SDK::FLinearColor& secondaryColor)
 	{
 		if (!material)
+		{
+			GlowDebugLog("ApplyGlowColorToMaterial: null material, skipping");
 			return;
+		}
 
 		static SDK::FName colorName{};
 		static SDK::FName color1Name{};
 
 		material->SetVectorParameterValue(SDK::GetStaticName(L"Color", colorName), primaryColor);
 		material->SetVectorParameterValue(SDK::GetStaticName(L"Color1", color1Name), secondaryColor);
+
+		GlowDebugLog("ApplyGlowColorToMaterial: set Color=" + FormatLinearColor(primaryColor) +
+			" Color1=" + FormatLinearColor(secondaryColor) +
+			" on '" + SafeObjectName(material) + "'");
 	}
 
 	SDK::UMaterialInstanceDynamic* CreateGlowOverrideMaterial(SDK::UMaterialInterface* sourceMaterial)
 	{
 		if (!Vars::World || !sourceMaterial)
+		{
+			GlowDebugLog(std::string("CreateGlowOverrideMaterial: aborting (world=") +
+				(Vars::World ? "ok" : "null") +
+				" sourceMaterial=" + (sourceMaterial ? "ok" : "null") + ")");
 			return nullptr;
+		}
 
 		SDK::UMaterialInstanceDynamic* dynamicMaterial =
 			SDK::UKismetMaterialLibrary::CreateDynamicMaterialInstance(
@@ -176,10 +227,60 @@ namespace
 				SDK::EMIDCreationFlags::Transient);
 
 		if (!dynamicMaterial)
+		{
+			GlowDebugLog("CreateGlowOverrideMaterial: CreateDynamicMaterialInstance returned null for '" +
+				SafeObjectName(sourceMaterial) + "'");
 			return nullptr;
+		}
 
 		dynamicMaterial->K2_CopyMaterialInstanceParameters(sourceMaterial, false);
+		GlowDebugLog("CreateGlowOverrideMaterial: created MID '" + SafeObjectName(dynamicMaterial) +
+			"' from source '" + SafeObjectName(sourceMaterial) + "'");
 		return dynamicMaterial;
+	}
+
+	bool RestoreGlowBlendablesSafely(
+		const Esp::GlowBlendableOverride* entries,
+		size_t entryCount,
+		size_t& restoredCount,
+		size_t& invalidOwnerCount,
+		size_t& mismatchCount)
+	{
+		__try
+		{
+			for (size_t i = 0; i < entryCount; i++)
+			{
+				const Esp::GlowBlendableOverride& overrideEntry = entries[i];
+
+				if (!overrideEntry.owner || !SDK::UKismetSystemLibrary::IsValid(static_cast<SDK::UObject*>(overrideEntry.owner)))
+				{
+					invalidOwnerCount++;
+					continue;
+				}
+
+				SDK::TArray<SDK::FWeightedBlendable>* blendables = GetBlendablesForOwner(overrideEntry.ownerType, overrideEntry.owner);
+				if (!blendables)
+					continue;
+				if (overrideEntry.index < 0 || overrideEntry.index >= blendables->Num())
+					continue;
+
+				SDK::FWeightedBlendable& blendable = (*blendables)[overrideEntry.index];
+				if (blendable.Object == overrideEntry.overrideObject)
+				{
+					blendable.Object = overrideEntry.originalObject;
+					restoredCount++;
+				}
+				else
+				{
+					mismatchCount++;
+				}
+			}
+			return true;
+		}
+		__except (EXCEPTION_EXECUTE_HANDLER)
+		{
+			return false;
+		}
 	}
 }
 
@@ -454,7 +555,10 @@ void Esp::ApplyGlowColorOverride(bool shouldScan)
 		return;
 
 	if (glowOverrideLevel && glowOverrideLevel != currentLevel)
+	{
+		GlowDebugLog("ApplyGlowColorOverride: level changed, restoring previous overrides");
 		RestoreGlowColorOverride();
+	}
 
 	SDK::FLinearColor primaryGlowColor{};
 	SDK::FLinearColor secondaryGlowColor{};
@@ -466,6 +570,7 @@ void Esp::ApplyGlowColorOverride(bool shouldScan)
 		!AreSameColor(lastAppliedGlowSecondaryColor, secondaryGlowColor);
 	if (colorChanged)
 	{
+		GlowDebugLog("ApplyGlowColorOverride: color changed -> " + FormatLinearColor(primaryGlowColor));
 		lastAppliedGlowColor = primaryGlowColor;
 		lastAppliedGlowSecondaryColor = secondaryGlowColor;
 		hasLastAppliedGlowColor = true;
@@ -473,27 +578,55 @@ void Esp::ApplyGlowColorOverride(bool shouldScan)
 
 	std::vector<GlowBlendableOverride> activeOverrides{};
 	activeOverrides.reserve(glowBlendableOverrides.size());
+	const size_t priorOverrideCount = glowBlendableOverrides.size();
+	size_t droppedOwnerInvalid = 0;
+	size_t droppedBlendablesNull = 0;
+	size_t droppedIndexOutOfRange = 0;
+	size_t droppedReplaced = 0;
 
 	for (const GlowBlendableOverride& overrideEntry : glowBlendableOverrides)
 	{
 		if (!overrideEntry.owner || !SDK::UKismetSystemLibrary::IsValid(static_cast<SDK::UObject*>(overrideEntry.owner)))
+		{
+			droppedOwnerInvalid++;
 			continue;
+		}
 
 		SDK::TArray<SDK::FWeightedBlendable>* blendables = GetBlendablesForOwner(overrideEntry.ownerType, overrideEntry.owner);
 		if (!blendables)
+		{
+			droppedBlendablesNull++;
 			continue;
+		}
 		if (overrideEntry.index < 0 || overrideEntry.index >= blendables->Num())
+		{
+			droppedIndexOutOfRange++;
 			continue;
+		}
 
 		SDK::FWeightedBlendable& blendable = (*blendables)[overrideEntry.index];
 		if (blendable.Object != overrideEntry.overrideObject)
+		{
+			droppedReplaced++;
 			continue;
+		}
 		if (!overrideEntry.overrideObject)
 			continue;
 
 		if (colorChanged)
 			ApplyGlowColorToMaterial(overrideEntry.overrideObject, primaryGlowColor, secondaryGlowColor);
 		activeOverrides.push_back(overrideEntry);
+	}
+
+	const size_t afterCount = activeOverrides.size();
+	if (priorOverrideCount != afterCount)
+	{
+		char buffer[256];
+		std::snprintf(buffer, sizeof(buffer),
+			"ApplyGlowColorOverride: pruned overrides %zu -> %zu (owner_invalid=%zu blendables_null=%zu index_oor=%zu replaced=%zu)",
+			priorOverrideCount, afterCount,
+			droppedOwnerInvalid, droppedBlendablesNull, droppedIndexOutOfRange, droppedReplaced);
+		GlowDebugLog(buffer);
 	}
 
 	glowBlendableOverrides.swap(activeOverrides);
@@ -503,6 +636,15 @@ void Esp::ApplyGlowColorOverride(bool shouldScan)
 	if (!shouldScan)
 		return;
 
+	GlowDebugLog("ApplyGlowColorOverride: scanning level for PostProcessVolume with HighlightMat_Inst blendable (actors=" +
+		std::to_string(currentLevel->Actors.Num()) + ")");
+
+	int postProcessVolumeCount = 0;
+	int volumesWithBlendables = 0;
+	int materialBlendables = 0;
+	int targetMaterialMatches = 0;
+	std::string firstNonMatchName;
+
 	for (int i = 0; i < currentLevel->Actors.Num(); i++)
 	{
 		SDK::AActor* actor = currentLevel->Actors[i];
@@ -511,23 +653,37 @@ void Esp::ApplyGlowColorOverride(bool shouldScan)
 		if (!actor->IsA(SDK::APostProcessVolume::StaticClass()))
 			continue;
 
+		postProcessVolumeCount++;
 		auto* postProcessVolume = static_cast<SDK::APostProcessVolume*>(actor);
 		SDK::TArray<SDK::FWeightedBlendable>& blendables = postProcessVolume->Settings.WeightedBlendables.Array;
 		if (blendables.Num() == 0)
 			continue;
 
+		volumesWithBlendables++;
 		SDK::FWeightedBlendable& blendable = blendables[0];
 		SDK::UObject* blendableObject = blendable.Object;
 		if (!blendableObject || !blendableObject->IsA(SDK::UMaterialInterface::StaticClass()))
 			continue;
 
+		materialBlendables++;
 		auto* sourceMaterial = static_cast<SDK::UMaterialInterface*>(blendableObject);
 		if (!IsTargetGlowBlendableMaterial(sourceMaterial))
+		{
+			if (firstNonMatchName.empty())
+				firstNonMatchName = SafeObjectName(sourceMaterial);
 			continue;
+		}
+
+		targetMaterialMatches++;
+		GlowDebugLog("ApplyGlowColorOverride: found target material '" + SafeObjectName(sourceMaterial) +
+			"' on PostProcessVolume '" + SafeObjectName(postProcessVolume) + "'");
 
 		SDK::UMaterialInstanceDynamic* overrideMaterial = CreateGlowOverrideMaterial(sourceMaterial);
 		if (!overrideMaterial)
+		{
+			GlowDebugLog("ApplyGlowColorOverride: CreateGlowOverrideMaterial failed, skipping this volume");
 			continue;
+		}
 
 		ApplyGlowColorToMaterial(overrideMaterial, primaryGlowColor, secondaryGlowColor);
 		glowBlendableOverrides.push_back({
@@ -539,8 +695,18 @@ void Esp::ApplyGlowColorOverride(bool shouldScan)
 			});
 		blendable.Object = overrideMaterial;
 		glowOverrideLevel = currentLevel;
+		GlowDebugLog("ApplyGlowColorOverride: hook installed (blendables[0] swapped to override MID); scan summary ppv=" +
+			std::to_string(postProcessVolumeCount) + " w/blendables=" + std::to_string(volumesWithBlendables) +
+			" w/material=" + std::to_string(materialBlendables));
 		return;
 	}
+
+	char summary[256];
+	std::snprintf(summary, sizeof(summary),
+		"ApplyGlowColorOverride: scan found no target (ppv=%d w/blendables=%d w/material=%d matches=%d first_nonmatch='%s')",
+		postProcessVolumeCount, volumesWithBlendables, materialBlendables, targetMaterialMatches,
+		firstNonMatchName.empty() ? "<none>" : firstNonMatchName.c_str());
+	GlowDebugLog(summary);
 }
 
 void Esp::RestoreGlowColorOverride()
@@ -552,27 +718,27 @@ void Esp::RestoreGlowColorOverride()
 		return;
 	}
 
-	__try
-	{
-		for (const GlowBlendableOverride& overrideEntry : glowBlendableOverrides)
-		{
-			if (!overrideEntry.owner || !SDK::UKismetSystemLibrary::IsValid(static_cast<SDK::UObject*>(overrideEntry.owner)))
-				continue;
+	GlowDebugLog("RestoreGlowColorOverride: restoring " + std::to_string(glowBlendableOverrides.size()) + " override(s)");
 
-			SDK::TArray<SDK::FWeightedBlendable>* blendables = GetBlendablesForOwner(overrideEntry.ownerType, overrideEntry.owner);
-			if (!blendables)
-				continue;
-			if (overrideEntry.index < 0 || overrideEntry.index >= blendables->Num())
-				continue;
+	size_t restoredCount = 0;
+	size_t invalidOwnerCount = 0;
+	size_t mismatchCount = 0;
 
-			SDK::FWeightedBlendable& blendable = (*blendables)[overrideEntry.index];
-			if (blendable.Object == overrideEntry.overrideObject)
-				blendable.Object = overrideEntry.originalObject;
-		}
-	}
-	__except (EXCEPTION_EXECUTE_HANDLER)
-	{
-	}
+	const bool restoreCompleted = RestoreGlowBlendablesSafely(
+		glowBlendableOverrides.data(),
+		glowBlendableOverrides.size(),
+		restoredCount,
+		invalidOwnerCount,
+		mismatchCount);
+
+	if (!restoreCompleted)
+		GlowDebugLog("RestoreGlowColorOverride: exception during restore loop");
+
+	char summary[192];
+	std::snprintf(summary, sizeof(summary),
+		"RestoreGlowColorOverride: restored=%zu invalid_owner=%zu already_replaced=%zu",
+		restoredCount, invalidOwnerCount, mismatchCount);
+	GlowDebugLog(summary);
 
 	glowBlendableOverrides.clear();
 	glowOverrideLevel = nullptr;
