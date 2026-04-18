@@ -171,27 +171,6 @@ void Gui::RenderMainWindow()
 							manager->pConfig->esp.ratBox3DEnabled,
 							manager->pConfig->esp.ratNameEnabled);
 
-						manager->pConfig->esp.policeEspEnabled =
-							manager->pConfig->esp.policeGlowEnabled ||
-							manager->pConfig->esp.policeBox2DEnabled ||
-							manager->pConfig->esp.policeBox3DEnabled ||
-							manager->pConfig->esp.policeNameEnabled;
-						manager->pConfig->esp.playerEspEnabled =
-							manager->pConfig->esp.playerGlowEnabled ||
-							manager->pConfig->esp.playerBox2DEnabled ||
-							manager->pConfig->esp.playerBox3DEnabled ||
-							manager->pConfig->esp.playerNameEnabled;
-						manager->pConfig->esp.cameraEspEnabled =
-							manager->pConfig->esp.cameraGlowEnabled ||
-							manager->pConfig->esp.cameraBox2DEnabled ||
-							manager->pConfig->esp.cameraBox3DEnabled ||
-							manager->pConfig->esp.cameraNameEnabled;
-						manager->pConfig->esp.ratEspEnabled =
-							manager->pConfig->esp.ratGlowEnabled ||
-							manager->pConfig->esp.ratBox2DEnabled ||
-							manager->pConfig->esp.ratBox3DEnabled ||
-							manager->pConfig->esp.ratNameEnabled;
-
 						ImGui::EndTable();
 					}
 					ImGui::EndChild();

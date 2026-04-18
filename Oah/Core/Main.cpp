@@ -99,10 +99,6 @@ DWORD WINAPI MainThread(HMODULE hmodule)
 			manager->pConfig->multishot.enabled = false;
 			manager->pConfig->aimbot.enabled = false;
 
-			manager->pConfig->esp.policeEspEnabled = false;
-			manager->pConfig->esp.playerEspEnabled = false;
-			manager->pConfig->esp.cameraEspEnabled = false;
-			manager->pConfig->esp.ratEspEnabled = false;
 			manager->pConfig->menu.enabled = false;
 
 			InterlockedExchange(&manager->pGui->unloadRequested, 1);

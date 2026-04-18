@@ -1,6 +1,7 @@
 #include "../Core/Manager.h"
 #include "Esp.h"
 
+#include <cfloat>
 #include <cstdio>
 #include <iostream>
 #include <string>
@@ -58,37 +59,27 @@ namespace
 		const std::vector<SDK::AActor*>& actors,
 		Esp::TrackedActorType type)
 	{
+		ImFont* nameFont = (manager && manager->pGui && manager->pGui->tahomaFont)
+			? manager->pGui->tahomaFont
+			: nullptr;
+
 		for (SDK::AActor* actor : actors)
-			destination.push_back({ actor, type });
-	}
-
-	bool IsPoliceEspActive(const Config& config)
-	{
-		return config.esp.policeGlowEnabled || config.esp.policeBox2DEnabled || config.esp.policeBox3DEnabled || config.esp.policeNameEnabled;
-	}
-
-	bool IsPlayerEspActive(const Config& config)
-	{
-		return config.esp.playerGlowEnabled || config.esp.playerBox2DEnabled || config.esp.playerBox3DEnabled || config.esp.playerNameEnabled;
-	}
-
-	bool IsCameraEspActive(const Config& config)
-	{
-		return config.esp.cameraGlowEnabled || config.esp.cameraBox2DEnabled || config.esp.cameraBox3DEnabled || config.esp.cameraNameEnabled;
-	}
-
-	bool IsRatEspActive(const Config& config)
-	{
-		return config.esp.ratGlowEnabled || config.esp.ratBox2DEnabled || config.esp.ratBox3DEnabled || config.esp.ratNameEnabled;
-	}
-
-	bool HasAnyBoxOverlayEnabled(const Config& config)
-	{
-		return
-			(IsPoliceEspActive(config) && (config.esp.policeBox2DEnabled || config.esp.policeBox3DEnabled || config.esp.policeNameEnabled)) ||
-			(IsPlayerEspActive(config) && (config.esp.playerBox2DEnabled || config.esp.playerBox3DEnabled || config.esp.playerNameEnabled)) ||
-			(IsCameraEspActive(config) && (config.esp.cameraBox2DEnabled || config.esp.cameraBox3DEnabled || config.esp.cameraNameEnabled)) ||
-			(IsRatEspActive(config) && (config.esp.ratBox2DEnabled || config.esp.ratBox3DEnabled || config.esp.ratNameEnabled));
+		{
+			Esp::CachedEspActor entry{};
+			entry.actor = actor;
+			entry.type = type;
+			if (actor)
+			{
+				entry.name = actor->GetName();
+				if (nameFont && !entry.name.empty())
+				{
+					const ImVec2 size = nameFont->CalcTextSizeA(Gui::kTahomaFontSize, FLT_MAX, 0.0f, entry.name.c_str());
+					entry.nameWidth = size.x;
+					entry.nameHeight = size.y;
+				}
+			}
+			destination.push_back(std::move(entry));
+		}
 	}
 
 	bool HasAnyGlowEnabled(const Config& config)
@@ -333,7 +324,7 @@ bool Esp::NeedsOverlayRender() const
 	return
 		(config.aimbot.enabled && config.aimbot.showFov) ||
 		config.esp.bulletTracersEnabled ||
-		HasAnyBoxOverlayEnabled(config);
+		HasAnyEspOverlayEnabled(config);
 }
 
 void Esp::TrackGlowPrimitive(SDK::UPrimitiveComponent* component)
@@ -373,7 +364,7 @@ void Esp::Tick()
 	bool ratBox3DNow = manager->pConfig->esp.ratBox3DEnabled;
 
 	bool anyGlowEnabled = HasAnyGlowEnabled(config);
-	bool anyBoxEnabled = HasAnyBoxOverlayEnabled(config);
+	bool anyBoxEnabled = HasAnyEspOverlayEnabled(config);
 	bool prevAnyGlowEnabled =
 		(prevPoliceEsp && prevPoliceGlow) ||
 		(prevPlayerEsp && prevPlayerGlow) ||
@@ -576,49 +567,47 @@ void Esp::ApplyGlowColorOverride(bool shouldScan)
 		hasLastAppliedGlowColor = true;
 	}
 
-	std::vector<GlowBlendableOverride> activeOverrides{};
-	activeOverrides.reserve(glowBlendableOverrides.size());
 	const size_t priorOverrideCount = glowBlendableOverrides.size();
 	size_t droppedOwnerInvalid = 0;
 	size_t droppedBlendablesNull = 0;
 	size_t droppedIndexOutOfRange = 0;
 	size_t droppedReplaced = 0;
 
-	for (const GlowBlendableOverride& overrideEntry : glowBlendableOverrides)
+	std::erase_if(glowBlendableOverrides, [&](const GlowBlendableOverride& overrideEntry)
 	{
 		if (!overrideEntry.owner || !SDK::UKismetSystemLibrary::IsValid(static_cast<SDK::UObject*>(overrideEntry.owner)))
 		{
 			droppedOwnerInvalid++;
-			continue;
+			return true;
 		}
 
 		SDK::TArray<SDK::FWeightedBlendable>* blendables = GetBlendablesForOwner(overrideEntry.ownerType, overrideEntry.owner);
 		if (!blendables)
 		{
 			droppedBlendablesNull++;
-			continue;
+			return true;
 		}
 		if (overrideEntry.index < 0 || overrideEntry.index >= blendables->Num())
 		{
 			droppedIndexOutOfRange++;
-			continue;
+			return true;
 		}
 
 		SDK::FWeightedBlendable& blendable = (*blendables)[overrideEntry.index];
 		if (blendable.Object != overrideEntry.overrideObject)
 		{
 			droppedReplaced++;
-			continue;
+			return true;
 		}
 		if (!overrideEntry.overrideObject)
-			continue;
+			return true;
 
 		if (colorChanged)
 			ApplyGlowColorToMaterial(overrideEntry.overrideObject, primaryGlowColor, secondaryGlowColor);
-		activeOverrides.push_back(overrideEntry);
-	}
+		return false;
+	});
 
-	const size_t afterCount = activeOverrides.size();
+	const size_t afterCount = glowBlendableOverrides.size();
 	if (priorOverrideCount != afterCount)
 	{
 		char buffer[256];
@@ -629,7 +618,6 @@ void Esp::ApplyGlowColorOverride(bool shouldScan)
 		GlowDebugLog(buffer);
 	}
 
-	glowBlendableOverrides.swap(activeOverrides);
 	if (!glowBlendableOverrides.empty())
 		return;
 

@@ -24,26 +24,6 @@ namespace
 		return actor && actor->IsA(SDK::ABulletTrace_C::StaticClass());
 	}
 
-	bool IsPoliceEspActive(const Config& config)
-	{
-		return config.esp.policeGlowEnabled || config.esp.policeBox2DEnabled || config.esp.policeBox3DEnabled || config.esp.policeNameEnabled;
-	}
-
-	bool IsPlayerEspActive(const Config& config)
-	{
-		return config.esp.playerGlowEnabled || config.esp.playerBox2DEnabled || config.esp.playerBox3DEnabled || config.esp.playerNameEnabled;
-	}
-
-	bool IsCameraEspActive(const Config& config)
-	{
-		return config.esp.cameraGlowEnabled || config.esp.cameraBox2DEnabled || config.esp.cameraBox3DEnabled || config.esp.cameraNameEnabled;
-	}
-
-	bool IsRatEspActive(const Config& config)
-	{
-		return config.esp.ratGlowEnabled || config.esp.ratBox2DEnabled || config.esp.ratBox3DEnabled || config.esp.ratNameEnabled;
-	}
-
 	ImU32 ToImU32(const float color[4])
 	{
 		return ImGui::ColorConvertFloat4ToU32(ImVec4(color[0], color[1], color[2], color[3]));
@@ -519,21 +499,29 @@ void Esp::RenderBulletTracers()
 
 void Esp::RenderEntityBoxes()
 {
-	const bool anyBoxesEnabled =
-		(IsPoliceEspActive(*manager->pConfig) && (manager->pConfig->esp.policeBox2DEnabled || manager->pConfig->esp.policeBox3DEnabled || manager->pConfig->esp.policeNameEnabled)) ||
-		(IsPlayerEspActive(*manager->pConfig) && (manager->pConfig->esp.playerBox2DEnabled || manager->pConfig->esp.playerBox3DEnabled || manager->pConfig->esp.playerNameEnabled)) ||
-		(IsCameraEspActive(*manager->pConfig) && (manager->pConfig->esp.cameraBox2DEnabled || manager->pConfig->esp.cameraBox3DEnabled || manager->pConfig->esp.cameraNameEnabled)) ||
-		(IsRatEspActive(*manager->pConfig) && (manager->pConfig->esp.ratBox2DEnabled || manager->pConfig->esp.ratBox3DEnabled || manager->pConfig->esp.ratNameEnabled));
-
-	if (!anyBoxesEnabled)
+	const Config& config = *manager->pConfig;
+	if (!HasAnyEspOverlayEnabled(config))
 		return;
 	if (!Vars::MyController || !Vars::MyController->PlayerCameraManager)
 		return;
 	if (cachedEspActors.empty())
 		return;
 
-	const Config& config = *manager->pConfig;
-	const bool filterDormant = manager->pConfig->settings.filterDormant;
+	struct TypeDrawFlags { bool active; bool draw2D; bool draw3D; bool drawName; };
+	const Config::Esp& e = config.esp;
+	const bool policeActive = IsPoliceEspActive(config);
+	const bool playerActive = IsPlayerEspActive(config);
+	const bool cameraActive = IsCameraEspActive(config);
+	const bool ratActive = IsRatEspActive(config);
+	const TypeDrawFlags flagsByType[] = {
+		/* Guard  */ { policeActive, e.policeBox2DEnabled, e.policeBox3DEnabled, e.policeNameEnabled },
+		/* Police */ { policeActive, e.policeBox2DEnabled, e.policeBox3DEnabled, e.policeNameEnabled },
+		/* Player */ { playerActive, e.playerBox2DEnabled, e.playerBox3DEnabled, e.playerNameEnabled },
+		/* Camera */ { cameraActive, e.cameraBox2DEnabled, e.cameraBox3DEnabled, e.cameraNameEnabled },
+		/* Rat    */ { ratActive,    e.ratBox2DEnabled,    e.ratBox3DEnabled,    e.ratNameEnabled    },
+	};
+
+	const bool filterDormant = config.settings.filterDormant;
 	auto* drawList = ImGui::GetBackgroundDrawList();
 	const SDK::FVector cameraLocation = Vars::MyController->PlayerCameraManager->GetCameraLocation();
 	static constexpr float kMaxEspDistance = 20000.0f;
@@ -547,65 +535,32 @@ void Esp::RenderEntityBoxes()
 		if (Fns::IsNullPointer(currActor))
 			continue;
 
-		bool shouldRender = false;
-		if (cachedActor.type == TrackedActorType::Guard)
-		{
-			auto* guard = static_cast<SDK::ANPC_Guard_C*>(currActor);
-			shouldRender = IsPoliceEspActive(*manager->pConfig) && !(filterDormant && guard->Dead_);
-		}
-		else if (cachedActor.type == TrackedActorType::Police)
-		{
-			auto* police = static_cast<SDK::ANPC_Police_base_C*>(currActor);
-			shouldRender = IsPoliceEspActive(*manager->pConfig) && !(filterDormant && police->Dead_);
-		}
-		else if (cachedActor.type == TrackedActorType::Player)
-		{
-			bool isLocalPlayer = currActor == Vars::CharacterClass || currActor->GetOwner() == Vars::MyController;
-			shouldRender = IsPlayerEspActive(*manager->pConfig) && !isLocalPlayer;
-		}
-		else if (cachedActor.type == TrackedActorType::Camera)
-		{
-			auto* camera = static_cast<SDK::ACameraBP_C*>(currActor);
-			shouldRender = IsCameraEspActive(*manager->pConfig) && !(filterDormant && camera->Destroyed_);
-		}
-		else if (cachedActor.type == TrackedActorType::Rat)
-		{
-			auto* rat = static_cast<SDK::ARatCharacter_C*>(currActor);
-			shouldRender = IsRatEspActive(*manager->pConfig) && !(filterDormant && rat->Dead_);
-		}
-
-		if (!shouldRender)
+		const TypeDrawFlags& tf = flagsByType[static_cast<int>(cachedActor.type)];
+		if (!tf.active)
+			continue;
+		if (!tf.draw2D && !tf.draw3D && !tf.drawName)
 			continue;
 
-		bool draw2D = false;
-		bool draw3D = false;
-		bool drawName = false;
+		bool shouldRender = true;
 		switch (cachedActor.type)
 		{
 		case TrackedActorType::Guard:
+			shouldRender = !(filterDormant && static_cast<SDK::ANPC_Guard_C*>(currActor)->Dead_);
+			break;
 		case TrackedActorType::Police:
-			draw2D = manager->pConfig->esp.policeBox2DEnabled;
-			draw3D = manager->pConfig->esp.policeBox3DEnabled;
-			drawName = manager->pConfig->esp.policeNameEnabled;
+			shouldRender = !(filterDormant && static_cast<SDK::ANPC_Police_base_C*>(currActor)->Dead_);
 			break;
 		case TrackedActorType::Player:
-			draw2D = manager->pConfig->esp.playerBox2DEnabled;
-			draw3D = manager->pConfig->esp.playerBox3DEnabled;
-			drawName = manager->pConfig->esp.playerNameEnabled;
+			shouldRender = !(currActor == Vars::CharacterClass || currActor->GetOwner() == Vars::MyController);
 			break;
 		case TrackedActorType::Camera:
-			draw2D = manager->pConfig->esp.cameraBox2DEnabled;
-			draw3D = manager->pConfig->esp.cameraBox3DEnabled;
-			drawName = manager->pConfig->esp.cameraNameEnabled;
+			shouldRender = !(filterDormant && static_cast<SDK::ACameraBP_C*>(currActor)->Destroyed_);
 			break;
 		case TrackedActorType::Rat:
-			draw2D = manager->pConfig->esp.ratBox2DEnabled;
-			draw3D = manager->pConfig->esp.ratBox3DEnabled;
-			drawName = manager->pConfig->esp.ratNameEnabled;
+			shouldRender = !(filterDormant && static_cast<SDK::ARatCharacter_C*>(currActor)->Dead_);
 			break;
 		}
-
-		if (!draw2D && !draw3D && !drawName)
+		if (!shouldRender)
 			continue;
 
 		const SDK::FVector actorLocation = currActor->K2_GetActorLocation();
@@ -625,12 +580,12 @@ void Esp::RenderEntityBoxes()
 		ImVec2 maxPoint{};
 		bool has2DRect = false;
 
-		if ((draw2D || drawName) && isCharacterActor)
+		if ((tf.draw2D || tf.drawName) && isCharacterActor)
 			has2DRect = GetCharacter2DBox(static_cast<SDK::ACharacter*>(currActor), minPoint, maxPoint);
 
 		std::array<ImVec2, 8> screenCorners{};
 		bool hasProjectedBounds = false;
-		if (draw3D || ((draw2D || drawName) && !has2DRect))
+		if (tf.draw3D || ((tf.draw2D || tf.drawName) && !has2DRect))
 		{
 			SDK::FVector origin{};
 			SDK::FVector extent{};
@@ -640,32 +595,24 @@ void Esp::RenderEntityBoxes()
 		}
 
 		const ImU32 boxColor = GetBoxColor(config, Vars::MyController, currActor, cameraLocation);
-		if (draw2D && (has2DRect || hasProjectedBounds))
+		if (tf.draw2D && (has2DRect || hasProjectedBounds))
 		{
 			drawList->AddRect(minPoint, maxPoint, GetOutlineColor(boxColor), 0.0f, 0, 1.0f + kOutlineThickness);
 			drawList->AddRect(minPoint, maxPoint, boxColor, 0.0f, 0, 1.0f);
 		}
-		if (draw3D && hasProjectedBounds)
+		if (tf.draw3D && hasProjectedBounds)
 			Draw3DBox(screenCorners, drawList, boxColor);
 
-		if (drawName && (has2DRect || hasProjectedBounds))
+		if (tf.drawName && (has2DRect || hasProjectedBounds) && !cachedActor.name.empty())
 		{
-			const std::string actorName = currActor->GetName();
-			if (!actorName.empty())
-			{
-				static constexpr float kNameFontSize = 13.0f;
-				ImFont* nameFont = (manager->pGui && manager->pGui->tahomaFont) ? manager->pGui->tahomaFont : ImGui::GetFont();
-				const ImVec2 textSize = nameFont
-					? nameFont->CalcTextSizeA(kNameFontSize, FLT_MAX, 0.0f, actorName.c_str())
-					: ImGui::CalcTextSize(actorName.c_str());
-				const float centerX = (minPoint.x + maxPoint.x) * 0.5f;
-				const ImVec2 textPos = { centerX - textSize.x * 0.5f, minPoint.y - textSize.y - 2.0f };
-				const ImVec2 shadowPos = { textPos.x + 1.0f, textPos.y + 1.0f };
-				const ImU32 shadowColor = IM_COL32(0, 0, 0, 200);
-				const ImU32 nameColor = IM_COL32(255, 255, 255, 255);
-				drawList->AddText(nameFont, kNameFontSize, shadowPos, shadowColor, actorName.c_str());
-				drawList->AddText(nameFont, kNameFontSize, textPos, nameColor, actorName.c_str());
-			}
+			ImFont* nameFont = (manager->pGui && manager->pGui->tahomaFont) ? manager->pGui->tahomaFont : ImGui::GetFont();
+			const float centerX = (minPoint.x + maxPoint.x) * 0.5f;
+			const ImVec2 textPos = { centerX - cachedActor.nameWidth * 0.5f, minPoint.y - cachedActor.nameHeight - 2.0f };
+			const ImVec2 shadowPos = { textPos.x + 1.0f, textPos.y + 1.0f };
+			static constexpr ImU32 shadowColor = IM_COL32(0, 0, 0, 200);
+			static constexpr ImU32 nameColor = IM_COL32(255, 255, 255, 255);
+			drawList->AddText(nameFont, Gui::kTahomaFontSize, shadowPos, shadowColor, cachedActor.name.c_str());
+			drawList->AddText(nameFont, Gui::kTahomaFontSize, textPos, nameColor, cachedActor.name.c_str());
 		}
 	}
 }

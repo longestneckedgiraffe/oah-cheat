@@ -31,6 +31,7 @@ public:
 
 	void RenderMainWindow();
 
+	static constexpr float kTahomaFontSize = 13.0f;
 	ImFont* tahomaFont = nullptr;
 
 	void SetupImGuiFonts();

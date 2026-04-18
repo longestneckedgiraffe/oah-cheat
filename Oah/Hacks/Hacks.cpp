@@ -680,16 +680,8 @@ void Hacks::Aimbot()
 
 	const SDK::FRotator currentRotation = Vars::MyController->GetControlRotation();
 
-	auto NormalizeAngleDelta = [](float angle) -> float
-	{
-		angle = fmodf(angle + 180.0f, 360.0f);
-		if (angle < 0.0f)
-			angle += 360.0f;
-		return angle - 180.0f;
-	};
-
-	const float deltaYaw = NormalizeAngleDelta(desiredYaw - currentRotation.Yaw);
-	const float deltaPitch = NormalizeAngleDelta(desiredPitch - currentRotation.Pitch);
+	const float deltaYaw = SDK::FRotator::NormalizeAxis(desiredYaw - currentRotation.Yaw);
+	const float deltaPitch = SDK::FRotator::NormalizeAxis(desiredPitch - currentRotation.Pitch);
 
 	float yawScale = Vars::MyController->InputYawScale;
 	float pitchScale = Vars::MyController->InputPitchScale;

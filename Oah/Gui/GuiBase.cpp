@@ -9,7 +9,7 @@ void Gui::SetupImGuiFonts()
 {
 	ImGuiIO& io = ImGui::GetIO();
 	io.Fonts->AddFontDefault();
-	tahomaFont = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\tahoma.ttf", 13.0f);
+	tahomaFont = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\tahoma.ttf", kTahomaFontSize);
 }
 
 void Gui::SetupImGuiStyle()
