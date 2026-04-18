@@ -64,31 +64,31 @@ namespace
 
 	bool IsPoliceEspActive(const Config& config)
 	{
-		return config.esp.policeGlowEnabled || config.esp.policeBox2DEnabled || config.esp.policeBox3DEnabled;
+		return config.esp.policeGlowEnabled || config.esp.policeBox2DEnabled || config.esp.policeBox3DEnabled || config.esp.policeNameEnabled;
 	}
 
 	bool IsPlayerEspActive(const Config& config)
 	{
-		return config.esp.playerGlowEnabled || config.esp.playerBox2DEnabled || config.esp.playerBox3DEnabled;
+		return config.esp.playerGlowEnabled || config.esp.playerBox2DEnabled || config.esp.playerBox3DEnabled || config.esp.playerNameEnabled;
 	}
 
 	bool IsCameraEspActive(const Config& config)
 	{
-		return config.esp.cameraGlowEnabled || config.esp.cameraBox2DEnabled || config.esp.cameraBox3DEnabled;
+		return config.esp.cameraGlowEnabled || config.esp.cameraBox2DEnabled || config.esp.cameraBox3DEnabled || config.esp.cameraNameEnabled;
 	}
 
 	bool IsRatEspActive(const Config& config)
 	{
-		return config.esp.ratGlowEnabled || config.esp.ratBox2DEnabled || config.esp.ratBox3DEnabled;
+		return config.esp.ratGlowEnabled || config.esp.ratBox2DEnabled || config.esp.ratBox3DEnabled || config.esp.ratNameEnabled;
 	}
 
 	bool HasAnyBoxOverlayEnabled(const Config& config)
 	{
 		return
-			(IsPoliceEspActive(config) && (config.esp.policeBox2DEnabled || config.esp.policeBox3DEnabled)) ||
-			(IsPlayerEspActive(config) && (config.esp.playerBox2DEnabled || config.esp.playerBox3DEnabled)) ||
-			(IsCameraEspActive(config) && (config.esp.cameraBox2DEnabled || config.esp.cameraBox3DEnabled)) ||
-			(IsRatEspActive(config) && (config.esp.ratBox2DEnabled || config.esp.ratBox3DEnabled));
+			(IsPoliceEspActive(config) && (config.esp.policeBox2DEnabled || config.esp.policeBox3DEnabled || config.esp.policeNameEnabled)) ||
+			(IsPlayerEspActive(config) && (config.esp.playerBox2DEnabled || config.esp.playerBox3DEnabled || config.esp.playerNameEnabled)) ||
+			(IsCameraEspActive(config) && (config.esp.cameraBox2DEnabled || config.esp.cameraBox3DEnabled || config.esp.cameraNameEnabled)) ||
+			(IsRatEspActive(config) && (config.esp.ratBox2DEnabled || config.esp.ratBox3DEnabled || config.esp.ratNameEnabled));
 	}
 
 	bool HasAnyGlowEnabled(const Config& config)

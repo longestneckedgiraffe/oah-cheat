@@ -18,7 +18,7 @@ namespace
 			value = maxValue;
 	}
 
-	void DrawEspToggleRow(const char* label, bool& glow, bool& box2D, bool& box3D)
+	void DrawEspToggleRow(const char* label, bool& glow, bool& box2D, bool& box3D, bool& name)
 	{
 		ImGui::PushID(label);
 		ImGui::TableNextRow();
@@ -34,6 +34,9 @@ namespace
 
 		ImGui::TableSetColumnIndex(3);
 		ImGui::Checkbox("##box3d", &box3D);
+
+		ImGui::TableSetColumnIndex(4);
+		ImGui::Checkbox("##name", &name);
 		ImGui::PopID();
 	}
 
@@ -131,51 +134,60 @@ void Gui::RenderMainWindow()
 
 					ImGui::TableNextColumn();
 					ImGui::BeginChild("##visualsLeft", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding);
-					if (ImGui::BeginTable("espRows", 4, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_BordersOuter))
+					if (ImGui::BeginTable("espRows", 5, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_BordersOuter))
 					{
 						ImGui::TableSetupColumn("Actor");
 						ImGui::TableSetupColumn("Glow");
 						ImGui::TableSetupColumn("2D");
 						ImGui::TableSetupColumn("3D");
+						ImGui::TableSetupColumn("Name");
 						ImGui::TableHeadersRow();
 
 						DrawEspToggleRow(
 							"Police and Guards",
 							manager->pConfig->esp.policeGlowEnabled,
 							manager->pConfig->esp.policeBox2DEnabled,
-							manager->pConfig->esp.policeBox3DEnabled);
+							manager->pConfig->esp.policeBox3DEnabled,
+							manager->pConfig->esp.policeNameEnabled);
 						DrawEspToggleRow(
 							"Players",
 							manager->pConfig->esp.playerGlowEnabled,
 							manager->pConfig->esp.playerBox2DEnabled,
-							manager->pConfig->esp.playerBox3DEnabled);
+							manager->pConfig->esp.playerBox3DEnabled,
+							manager->pConfig->esp.playerNameEnabled);
 						DrawEspToggleRow(
 							"Cameras",
 							manager->pConfig->esp.cameraGlowEnabled,
 							manager->pConfig->esp.cameraBox2DEnabled,
-							manager->pConfig->esp.cameraBox3DEnabled);
+							manager->pConfig->esp.cameraBox3DEnabled,
+							manager->pConfig->esp.cameraNameEnabled);
 						DrawEspToggleRow(
 							"Rats",
 							manager->pConfig->esp.ratGlowEnabled,
 							manager->pConfig->esp.ratBox2DEnabled,
-							manager->pConfig->esp.ratBox3DEnabled);
+							manager->pConfig->esp.ratBox3DEnabled,
+							manager->pConfig->esp.ratNameEnabled);
 
 						manager->pConfig->esp.policeEspEnabled =
 							manager->pConfig->esp.policeGlowEnabled ||
 							manager->pConfig->esp.policeBox2DEnabled ||
-							manager->pConfig->esp.policeBox3DEnabled;
+							manager->pConfig->esp.policeBox3DEnabled ||
+							manager->pConfig->esp.policeNameEnabled;
 						manager->pConfig->esp.playerEspEnabled =
 							manager->pConfig->esp.playerGlowEnabled ||
 							manager->pConfig->esp.playerBox2DEnabled ||
-							manager->pConfig->esp.playerBox3DEnabled;
+							manager->pConfig->esp.playerBox3DEnabled ||
+							manager->pConfig->esp.playerNameEnabled;
 						manager->pConfig->esp.cameraEspEnabled =
 							manager->pConfig->esp.cameraGlowEnabled ||
 							manager->pConfig->esp.cameraBox2DEnabled ||
-							manager->pConfig->esp.cameraBox3DEnabled;
+							manager->pConfig->esp.cameraBox3DEnabled ||
+							manager->pConfig->esp.cameraNameEnabled;
 						manager->pConfig->esp.ratEspEnabled =
 							manager->pConfig->esp.ratGlowEnabled ||
 							manager->pConfig->esp.ratBox2DEnabled ||
-							manager->pConfig->esp.ratBox3DEnabled;
+							manager->pConfig->esp.ratBox3DEnabled ||
+							manager->pConfig->esp.ratNameEnabled;
 
 						ImGui::EndTable();
 					}

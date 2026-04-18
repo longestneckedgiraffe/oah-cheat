@@ -26,22 +26,22 @@ namespace
 
 	bool IsPoliceEspActive(const Config& config)
 	{
-		return config.esp.policeGlowEnabled || config.esp.policeBox2DEnabled || config.esp.policeBox3DEnabled;
+		return config.esp.policeGlowEnabled || config.esp.policeBox2DEnabled || config.esp.policeBox3DEnabled || config.esp.policeNameEnabled;
 	}
 
 	bool IsPlayerEspActive(const Config& config)
 	{
-		return config.esp.playerGlowEnabled || config.esp.playerBox2DEnabled || config.esp.playerBox3DEnabled;
+		return config.esp.playerGlowEnabled || config.esp.playerBox2DEnabled || config.esp.playerBox3DEnabled || config.esp.playerNameEnabled;
 	}
 
 	bool IsCameraEspActive(const Config& config)
 	{
-		return config.esp.cameraGlowEnabled || config.esp.cameraBox2DEnabled || config.esp.cameraBox3DEnabled;
+		return config.esp.cameraGlowEnabled || config.esp.cameraBox2DEnabled || config.esp.cameraBox3DEnabled || config.esp.cameraNameEnabled;
 	}
 
 	bool IsRatEspActive(const Config& config)
 	{
-		return config.esp.ratGlowEnabled || config.esp.ratBox2DEnabled || config.esp.ratBox3DEnabled;
+		return config.esp.ratGlowEnabled || config.esp.ratBox2DEnabled || config.esp.ratBox3DEnabled || config.esp.ratNameEnabled;
 	}
 
 	ImU32 ToImU32(const float color[4])
@@ -544,10 +544,10 @@ void Esp::RenderBulletTracers()
 void Esp::RenderEntityBoxes()
 {
 	const bool anyBoxesEnabled =
-		(IsPoliceEspActive(*manager->pConfig) && (manager->pConfig->esp.policeBox2DEnabled || manager->pConfig->esp.policeBox3DEnabled)) ||
-		(IsPlayerEspActive(*manager->pConfig) && (manager->pConfig->esp.playerBox2DEnabled || manager->pConfig->esp.playerBox3DEnabled)) ||
-		(IsCameraEspActive(*manager->pConfig) && (manager->pConfig->esp.cameraBox2DEnabled || manager->pConfig->esp.cameraBox3DEnabled)) ||
-		(IsRatEspActive(*manager->pConfig) && (manager->pConfig->esp.ratBox2DEnabled || manager->pConfig->esp.ratBox3DEnabled));
+		(IsPoliceEspActive(*manager->pConfig) && (manager->pConfig->esp.policeBox2DEnabled || manager->pConfig->esp.policeBox3DEnabled || manager->pConfig->esp.policeNameEnabled)) ||
+		(IsPlayerEspActive(*manager->pConfig) && (manager->pConfig->esp.playerBox2DEnabled || manager->pConfig->esp.playerBox3DEnabled || manager->pConfig->esp.playerNameEnabled)) ||
+		(IsCameraEspActive(*manager->pConfig) && (manager->pConfig->esp.cameraBox2DEnabled || manager->pConfig->esp.cameraBox3DEnabled || manager->pConfig->esp.cameraNameEnabled)) ||
+		(IsRatEspActive(*manager->pConfig) && (manager->pConfig->esp.ratBox2DEnabled || manager->pConfig->esp.ratBox3DEnabled || manager->pConfig->esp.ratNameEnabled));
 
 	if (!anyBoxesEnabled)
 		return;
@@ -603,28 +603,33 @@ void Esp::RenderEntityBoxes()
 
 		bool draw2D = false;
 		bool draw3D = false;
+		bool drawName = false;
 		switch (cachedActor.type)
 		{
 		case TrackedActorType::Guard:
 		case TrackedActorType::Police:
 			draw2D = manager->pConfig->esp.policeBox2DEnabled;
 			draw3D = manager->pConfig->esp.policeBox3DEnabled;
+			drawName = manager->pConfig->esp.policeNameEnabled;
 			break;
 		case TrackedActorType::Player:
 			draw2D = manager->pConfig->esp.playerBox2DEnabled;
 			draw3D = manager->pConfig->esp.playerBox3DEnabled;
+			drawName = manager->pConfig->esp.playerNameEnabled;
 			break;
 		case TrackedActorType::Camera:
 			draw2D = manager->pConfig->esp.cameraBox2DEnabled;
 			draw3D = manager->pConfig->esp.cameraBox3DEnabled;
+			drawName = manager->pConfig->esp.cameraNameEnabled;
 			break;
 		case TrackedActorType::Rat:
 			draw2D = manager->pConfig->esp.ratBox2DEnabled;
 			draw3D = manager->pConfig->esp.ratBox3DEnabled;
+			drawName = manager->pConfig->esp.ratNameEnabled;
 			break;
 		}
 
-		if (!draw2D && !draw3D)
+		if (!draw2D && !draw3D && !drawName)
 			continue;
 
 		const SDK::FVector actorLocation = currActor->K2_GetActorLocation();
@@ -644,12 +649,12 @@ void Esp::RenderEntityBoxes()
 		ImVec2 maxPoint{};
 		bool has2DRect = false;
 
-		if (draw2D && isCharacterActor)
+		if ((draw2D || drawName) && isCharacterActor)
 			has2DRect = GetCharacter2DBox(static_cast<SDK::ACharacter*>(currActor), minPoint, maxPoint);
 
 		std::array<ImVec2, 8> screenCorners{};
 		bool hasProjectedBounds = false;
-		if (draw3D || (draw2D && !has2DRect))
+		if (draw3D || ((draw2D || drawName) && !has2DRect))
 		{
 			SDK::FVector origin{};
 			SDK::FVector extent{};
@@ -666,6 +671,25 @@ void Esp::RenderEntityBoxes()
 		}
 		if (draw3D && hasProjectedBounds)
 			Draw3DBox(screenCorners, drawList, boxColor);
+
+		if (drawName && (has2DRect || hasProjectedBounds))
+		{
+			const std::string actorName = currActor->GetName();
+			if (!actorName.empty())
+			{
+				static constexpr float kNameFontSize = 13.0f;
+				ImFont* nameFont = (manager->pGui && manager->pGui->tahomaFont) ? manager->pGui->tahomaFont : ImGui::GetFont();
+				const ImVec2 textSize = nameFont
+					? nameFont->CalcTextSizeA(kNameFontSize, FLT_MAX, 0.0f, actorName.c_str())
+					: ImGui::CalcTextSize(actorName.c_str());
+				const float centerX = (minPoint.x + maxPoint.x) * 0.5f;
+				const ImVec2 textPos = { centerX - textSize.x * 0.5f, minPoint.y - textSize.y - 2.0f };
+				const ImVec2 shadowPos = { textPos.x + 1.0f, textPos.y + 1.0f };
+				const ImU32 shadowColor = IM_COL32(0, 0, 0, 200);
+				drawList->AddText(nameFont, kNameFontSize, shadowPos, shadowColor, actorName.c_str());
+				drawList->AddText(nameFont, kNameFontSize, textPos, boxColor, actorName.c_str());
+			}
+		}
 	}
 }
 
