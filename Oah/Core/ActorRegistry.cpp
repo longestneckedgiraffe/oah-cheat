@@ -18,7 +18,7 @@
 
 namespace
 {
-	constexpr std::uint32_t kStableRegistryRefreshInterval = 30;
+	constexpr std::uint32_t kRefreshInterval = 30;
 
 	bool IsCivilianActor(SDK::AActor* actor)
 	{
@@ -34,20 +34,24 @@ void ActorRegistry::Refresh(bool force)
 		return;
 	}
 
+	if (!force)
+	{
+		if (refreshTicks < kRefreshInterval)
+		{
+			++refreshTicks;
+			return;
+		}
+		refreshTicks = 0;
+	}
+
 	std::vector<SDK::ULevel*> levels{};
 	levels.reserve(Vars::World->Levels.Num());
-
-	std::vector<int> actorCounts{};
-	actorCounts.reserve(Vars::World->Levels.Num());
 
 	for (int i = 0; i < Vars::World->Levels.Num(); i++)
 	{
 		SDK::ULevel* level = Vars::World->Levels[i];
-		if (!level)
-			continue;
-
-		levels.push_back(level);
-		actorCounts.push_back(level->Actors.Num());
+		if (level)
+			levels.push_back(level);
 	}
 
 	if (levels.empty())
@@ -56,33 +60,13 @@ void ActorRegistry::Refresh(bool force)
 		return;
 	}
 
-	const bool registryLayoutChanged =
-		cachedWorld != Vars::World ||
-		cachedLevels != levels ||
-		cachedActorCounts != actorCounts;
-	if (!force && !registryLayoutChanged)
-	{
-		if (stableRefreshTicks < kStableRegistryRefreshInterval)
-		{
-			++stableRefreshTicks;
-			return;
-		}
-	}
-
 	Rebuild(levels);
-	cachedWorld = Vars::World;
-	cachedLevels = levels;
-	cachedActorCounts = std::move(actorCounts);
-	stableRefreshTicks = 0;
 	++revision;
 }
 
 void ActorRegistry::Clear()
 {
 	const bool hadState =
-		cachedWorld != nullptr ||
-		!cachedLevels.empty() ||
-		!cachedActorCounts.empty() ||
 		!guards.empty() ||
 		!police.empty() ||
 		!players.empty() ||
@@ -96,10 +80,7 @@ void ActorRegistry::Clear()
 		!robberTrucks.empty() ||
 		!civilians.empty();
 
-	cachedWorld = nullptr;
-	cachedLevels.clear();
-	cachedActorCounts.clear();
-	stableRefreshTicks = 0;
+	refreshTicks = 0;
 
 	guards.clear();
 	police.clear();
@@ -139,6 +120,18 @@ void ActorRegistry::Rebuild(const std::vector<SDK::ULevel*>& levels)
 		estimatedActors += static_cast<size_t>(level->Actors.Num());
 	seenActors.reserve(estimatedActors);
 
+	SDK::UClass* const guardClass = SDK::ANPC_Guard_C::StaticClass();
+	SDK::UClass* const policeClass = SDK::ANPC_Police_base_C::StaticClass();
+	SDK::UClass* const playerClass = SDK::APlayerCharacter_C::StaticClass();
+	SDK::UClass* const cameraClass = SDK::ACameraBP_C::StaticClass();
+	SDK::UClass* const ratClass = SDK::ARatCharacter_C::StaticClass();
+	SDK::UClass* const doorClass = SDK::ADoorBP_C::StaticClass();
+	SDK::UClass* const alarmClass = SDK::AAlarmBP_C::StaticClass();
+	SDK::UClass* const lockClass = SDK::ALock_C::StaticClass();
+	SDK::UClass* const duffelbagClass = SDK::ADuffelbag_C::StaticClass();
+	SDK::UClass* const robberTruckClass = SDK::ARobberTruck_C::StaticClass();
+	SDK::UClass* const moneyClass = SDK::AMoney_base_C::StaticClass();
+
 	for (SDK::ULevel* level : levels)
 	{
 		for (int actorIndex = 0; actorIndex < level->Actors.Num(); actorIndex++)
@@ -152,27 +145,27 @@ void ActorRegistry::Rebuild(const std::vector<SDK::ULevel*>& levels)
 			if (!seenActors.insert(actor).second)
 				continue;
 
-			if (actor->IsA(SDK::ANPC_Guard_C::StaticClass()))
+			if (actor->IsA(guardClass))
 				guards.push_back(actor);
-			else if (actor->IsA(SDK::ANPC_Police_base_C::StaticClass()))
+			else if (actor->IsA(policeClass))
 				police.push_back(actor);
-			else if (actor->IsA(SDK::APlayerCharacter_C::StaticClass()))
+			else if (actor->IsA(playerClass))
 				players.push_back(actor);
-			else if (actor->IsA(SDK::ACameraBP_C::StaticClass()))
+			else if (actor->IsA(cameraClass))
 				cameras.push_back(actor);
-			else if (actor->IsA(SDK::ARatCharacter_C::StaticClass()))
+			else if (actor->IsA(ratClass))
 				rats.push_back(actor);
-			else if (actor->IsA(SDK::ADoorBP_C::StaticClass()))
+			else if (actor->IsA(doorClass))
 				doors.push_back(actor);
-			else if (actor->IsA(SDK::AAlarmBP_C::StaticClass()))
+			else if (actor->IsA(alarmClass))
 				alarms.push_back(actor);
-			else if (actor->IsA(SDK::ALock_C::StaticClass()))
+			else if (actor->IsA(lockClass))
 				locks.push_back(actor);
-			else if (actor->IsA(SDK::ADuffelbag_C::StaticClass()))
+			else if (actor->IsA(duffelbagClass))
 				duffelbags.push_back(actor);
-			else if (actor->IsA(SDK::ARobberTruck_C::StaticClass()))
+			else if (actor->IsA(robberTruckClass))
 				robberTrucks.push_back(actor);
-			else if (actor->IsA(SDK::AMoney_base_C::StaticClass()))
+			else if (actor->IsA(moneyClass))
 				money.push_back(actor);
 			else if (IsCivilianActor(actor))
 				civilians.push_back(actor);
